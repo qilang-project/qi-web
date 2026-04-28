@@ -233,6 +233,29 @@ http://127.0.0.1:3076
 - `使用开发中间件(应用值)`
 - `使用生产中间件(应用值)`
 
+### 跨域 / 缓存 / 压缩
+
+完整的 CORS / Cache-Control / gzip 三件套：
+
+- `使用跨域开放(应用值)` — `*` 通配，常用 method/header 默认 600s 预检缓存
+- `使用跨域配置(应用值, 允许来源, 允许方法, 允许头, 允许凭证, 最大缓存秒)`
+  - 允许来源支持 `"*"`、单一来源、`","` 分隔的白名单
+  - 自动处理 OPTIONS preflight，响应附 `Access-Control-Allow-*` + `Vary: Origin`
+- `使用跨域暴露头(应用值, 暴露头)` — 设置 `Access-Control-Expose-Headers`
+- `使用缓存(应用值, 指令文本)` — 例如 `"public, max-age=60"`，默认只对 GET/HEAD 生效
+- `使用静态缓存(应用值, 秒数)` — `public, max-age=N` 的简写
+- `使用不缓存(应用值)` — `no-store, no-cache, must-revalidate`，覆盖所有方法
+- `使用压缩(应用值)` — gzip body，默认阈值 1024 字节
+- `使用压缩配置(应用值, 最小字节)` — 自定义压缩阈值
+
+注意：
+
+- 压缩中间件应该 **最先注册**（最外层），让它能拿到经过其他中间件后的最终响应再 gzip
+- 压缩只对 `text/*`、`application/json`、`application/xml`、`application/javascript`、`image/svg+xml` 等可压缩类型生效
+- 压缩绕过常规序列化，直接把 headers + 压缩字节写到 socket，业务侧的 `响应.主体` 是 UTF-8 字符串这个限制不影响它
+
+完整示例：`examples/CORS_压缩_缓存.qi`
+
 `使用开发中间件` 现在默认会串上：
 
 - `恢复`

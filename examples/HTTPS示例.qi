@@ -1,0 +1,55 @@
+// HTTPS 服务器示例
+// 用法：
+//   1. 准备证书与私钥（自签名）：
+//      openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+//          -keyout /tmp/qi_key.pem -out /tmp/qi_cert.pem -subj '/CN=localhost'
+//   2. 编译运行：qi compile HTTPS示例.qi -o /tmp/qi_https && /tmp/qi_https
+//   3. 测试：curl -k https://127.0.0.1:6759/
+包 主程序;
+
+导入 Web::{
+    应用, 路由组, 上下文, 响应,
+    创建应用, 配置, 获取,
+    创建路由组, 组使用中间件, 组获取,
+    请求头, 文本, JSON,
+    运行应用_TLS
+};
+
+导入 标准库.字符串;
+
+函数 简单认证(下一步: 函数(上下文): 响应, 上下文值: 上下文) : 响应 {
+    如果 (字符串::等于(请求头(上下文值, "X-Token"), "secret") == 0) {
+        返回 (响应 {
+            状态码: 401,
+            状态文本: "Unauthorized",
+            头部: "Content-Type: text/plain",
+            主体: "缺 X-Token"
+        });
+    }
+    返回 下一步(上下文值);
+}
+
+函数 首页处理(上下文值: 上下文) : 响应 {
+    返回 文本("Hello over HTTPS!");
+}
+
+函数 健康(上下文值: 上下文) : 响应 {
+    返回 JSON("{\"status\":\"ok\",\"tls\":true}");
+}
+
+函数 用户列表(上下文值: 上下文) : 响应 {
+    返回 JSON("[\"alice\",\"bob\"]");
+}
+
+函数 入口() {
+    变量 应用值: 应用 = 创建应用();
+    应用值 = 配置(应用值, "127.0.0.1", 6759);
+    应用值 = 获取(应用值, "/", 首页处理);
+    应用值 = 获取(应用值, "/health", 健康);
+
+    变量 API: 路由组 = 创建路由组("/api/v1");
+    API = 组使用中间件(API, 简单认证);
+    应用值 = 组获取(应用值, API, "/users", 用户列表);
+
+    运行应用_TLS(应用值, "/tmp/qi_cert.pem", "/tmp/qi_key.pem");
+}
