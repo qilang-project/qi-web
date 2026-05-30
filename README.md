@@ -1,10 +1,12 @@
 # Qi Web
 
-Qi Web 是一个用 **Qi 语言**编写的 Web 框架。现在的方向很明确：
+Qi Web 是一个用 **奇语（Qi）**编写的 Web 框架。性能上实测 **~122k RPS**（比 Express 快 5.5×，比 Node.js 快 ~25%），热路径用 Rust 加速。方向很明确：
 
 - **核心像 Axum / Gin**
-- **使用体验尽量像 FastAPI**
+- **使用体验尽量像 FastAPI / Express**
 - **控制器只是上层扩展，不是内核**
+
+> 📘 AI 辅助：本项目带 [`SKILL.md`](SKILL.md)，可作为 agent skill 安装，让 AI 助手准确生成 qi-web 代码。
 
 现在公开的重心就是这几个词：
 
