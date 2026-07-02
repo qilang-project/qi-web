@@ -32,3 +32,6 @@ examples/恢复中间件
 examples/数据库示例
 examples/路径参数示例
 examples/限流示例
+
+# 示例的就地包解析 symlink(Windows 检出会坏,不入库;见 README 示例一节)
+examples/qi_packages/

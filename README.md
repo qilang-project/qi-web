@@ -85,6 +85,15 @@ Qi Web 是一个用 **奇语（Qi）**编写的 Web 框架。性能上实测 **~
 
 ## 示例
 
+示例通过 `examples/qi_packages/Web -> ../..` 符号链接就地解析 `导入 Web`
+（编译器会向上找 `qi_packages`）。该链接不入 git（Windows 检出会坏），克隆后跑示例前先建：
+
+```bash
+mkdir -p examples/qi_packages && ln -s ../.. examples/qi_packages/Web
+```
+
+IDE 里看到 qi_packages/Web 下"套娃"出整个仓库，是符号链接的正常渲染，不是文件重复。
+
 建议按这个顺序看：
 
 - `examples/核心API.qi`
