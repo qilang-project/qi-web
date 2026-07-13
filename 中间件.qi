@@ -8,21 +8,21 @@
 变量 限流计数: 整数 = 0;
 
 函数 服务器错误(消息: 字符串) : 响应 {
-    返回 (响应 {
+    返回 新建 响应 {
         状态码: 500,
         状态文本: "Internal Server Error",
         头部: "Content-Type: application/json; charset=utf-8",
         主体: "{\"error\":\"" + 消息 + "\"}"
-    });
+    };
 }
 
 函数 请求过多(剩余毫秒: 整数) : 响应 {
-    变量 响应值: 响应 = (响应 {
+    变量 响应值: 响应 = 新建 响应 {
         状态码: 429,
         状态文本: "Too Many Requests",
         头部: "Content-Type: application/json; charset=utf-8",
         主体: "{\"error\":\"请求过多\"}"
-    });
+    };
     返回 设置响应头(响应值, "Retry-After", 整数转字符串(剩余毫秒));
 }
 
@@ -33,12 +33,12 @@
 }
 
 函数 超时响应(毫秒数: 整数) : 响应 {
-    返回 (响应 {
+    返回 新建 响应 {
         状态码: 504,
         状态文本: "Gateway Timeout",
         头部: "Content-Type: application/json; charset=utf-8",
         主体: "{\"error\":\"超时\",\"timeout\":" + 整数转字符串(毫秒数) + "}"
-    });
+    };
 }
 
 // 注：goroutine 级 panic 已经在 runtime 的 spawn_goroutine_with_args 里

@@ -25,12 +25,12 @@
         }
         返回 JSON("{\"area\":" + 整数转字符串(宽 * 高) + "}");
     } 捕获 错误: 字符串 {
-        返回 (响应 {
+        返回 新建 响应 {
             状态码: 400,
             状态文本: "Bad Request",
             头部: "Content-Type: application/json; charset=utf-8",
             主体: "{\"error\":\"" + 错误 + "\"}"
-        });
+        };
     }
 }
 
