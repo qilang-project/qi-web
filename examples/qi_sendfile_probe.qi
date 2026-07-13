@@ -1,0 +1,34 @@
+包 主程序;
+
+导入 Web::{应用, 上下文, 响应, 创建应用, 配置, 获取, 文本, 发送文件, 下载文件, 运行应用};
+
+函数 处理jpg(上下文值: 上下文) : 响应 {
+    返回 发送文件("/tmp/qi_sendfile_probe/xiaoqi.jpg");
+}
+
+函数 处理js(上下文值: 上下文) : 响应 {
+    返回 发送文件("/tmp/qi_sendfile_probe/app.js");
+}
+
+函数 处理missing(上下文值: 上下文) : 响应 {
+    返回 发送文件("/tmp/qi_sendfile_probe/nope.jpg");
+}
+
+函数 处理evil(上下文值: 上下文) : 响应 {
+    返回 发送文件("/tmp/qi_sendfile_probe/../etc/passwd");
+}
+
+函数 处理download(上下文值: 上下文) : 响应 {
+    返回 下载文件("/tmp/qi_sendfile_probe/xiaoqi.jpg", "pic.jpg");
+}
+
+函数 入口() {
+    变量 应用值: 应用 = 创建应用();
+    应用值 = 配置(应用值, "127.0.0.1", 34871);
+    应用值 = 获取(应用值, "/jpg", 处理jpg);
+    应用值 = 获取(应用值, "/js", 处理js);
+    应用值 = 获取(应用值, "/missing", 处理missing);
+    应用值 = 获取(应用值, "/evil", 处理evil);
+    应用值 = 获取(应用值, "/download", 处理download);
+    运行应用(应用值);
+}

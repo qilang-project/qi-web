@@ -62,13 +62,18 @@
         返回 下一步(上下文值);
     }
 
-    变量 文件内容: 字符串 = 输入输出.读取文件(文件路径);
-    变量 响应值: 响应 = 文本(文件内容);
-    响应值.头部 = "Content-Type: " + 静态内容类型(文件路径);
-    响应值 = 设置响应头(响应值, "Cache-Control", "public, max-age=60");
+    // HEAD：不发 body，返回 Content-Type + 缓存头即可（Content-Length=0，同旧行为）。
+    // 不走 sendfile（sendfile 的 Rust 路径总会读文件写 body，HEAD 不需要）。
     如果 (请求方法(上下文值) == "HEAD") {
-        响应值.主体 = "";
+        变量 头响应: 响应 = 文本("");
+        头响应.头部 = "Content-Type: " + 静态内容类型(文件路径);
+        返回 设置响应头(头响应, "Cache-Control", "public, max-age=60");
     }
+
+    // GET：走 sendfile —— 二进制安全（图片/字体等经 Rust std::fs::read 字节直发，
+    // 不再经 UTF-8 字符串管道被 NUL 截断或读空）。发送文件 已按扩展名设好 Content-Type。
+    变量 响应值: 响应 = 发送文件(文件路径);
+    响应值 = 设置响应头(响应值, "Cache-Control", "public, max-age=60");
     返回 响应值;
 }
 
