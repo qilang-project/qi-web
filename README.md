@@ -33,6 +33,9 @@ Qi Web 是一个用 **奇语（Qi）**编写的 Web 框架。性能上实测 **~
 - `会话.qi`
 - `认证.qi`
 - `控制器.qi`
+- `事件流.qi`（SSE 服务器推送）
+- `实时页面.qi`（LiveView 式实时 UI）
+- `RPC.qi`（Connect 协议 JSON 一元调用）
 
 公开 API 主要是：
 
@@ -331,6 +334,98 @@ http://127.0.0.1:3076
   - `禁止访问(消息)`
   - `需要认证(next, ctx)`
 
+## 事件流（SSE）
+
+`事件流.qi` 在 chunked 流式机制之上提供 Server-Sent Events。适合 LLM token
+渐显、进度推送、日志尾随等单向推送场景（浏览器端用原生 `EventSource`）。
+
+```qi
+函数 推送处理(上下文值: 上下文) : 响应 {
+    SSE开始(上下文值);                        // 写 text/event-stream 响应头
+    SSE发送(上下文值, "message", "第一条");    // event: message\ndata: 第一条\n\n
+    SSE发送数据(上下文值, "无事件名，走默认 message");
+    SSE发送(上下文值, "done", "[完成]");       // 结束事件，前端收到后 es.close()
+    SSE结束(上下文值);                        // chunked 终止块
+    返回 SSE完成响应();                       // 状态码 0 = 已自行写完
+}
+```
+
+- 数据里的换行自动按规范拆成多条 `data:` 行，接收端会拼回。
+- 依赖 `ctx.客户端句柄`，**必须用同步 `运行应用`**（`运行应用_异步` 不支持流式）。
+- 连接在 `SSE结束` 后关闭；`EventSource` 默认会自动重连重放，一次性流务必发
+  结束事件让前端主动 `close()`。
+- LLM 流式聊天完整示例见 `examples/llm_聊天_SSE.qi`（有 QI_LLM_KEY 走
+  qi-harness `流式问` 真 token 流，无 key 降级为固定回复逐字推送）。
+
+## 实时页面（LiveView 式）
+
+`实时页面.qi` 提供 Phoenix LiveView 式的服务端驱动 UI：状态在服务端，事件经
+WebSocket 上行，服务端重渲染后整区 HTML 下行替换（v1 不做 DOM diff）。页面
+上不用写一行业务 JS。
+
+```qi
+函数 初始状态() : 整数 {                       // 每连接一份状态（J 对象句柄）
+    变量 状态: 整数 = J.创建对象();
+    J.设置整数(状态, "计数", 0);
+    返回 状态;
+}
+函数 渲染(状态: 整数) : 字符串 {               // 状态 → HTML 片段
+    返回 "<h2>计数: " + 整数转字符串(J.获取整数(状态, "计数")) + "</h2>"
+        + "<button data-点击=\"加一\">+1</button>";
+}
+函数 处理事件(状态: 整数, 事件名: 字符串, 载荷JSON: 字符串) : 整数 {
+    如果 (字符串::等于(事件名, "加一") == 1) {
+        J.设置整数(状态, "计数", J.获取整数(状态, "计数") + 1);
+    }
+    返回 状态;
+}
+
+应用值 = 实时路由(应用值, "/", 初始状态, 渲染, 处理事件);
+运行应用(应用值);   // 依赖 WS 升级，必须用同步 运行应用
+```
+
+- 声明式事件绑定：`data-点击="事件名"`（click）、`data-输入="事件名"`
+  （input，载荷带 `value`）、`data-提交="事件名"`（表单 submit，载荷为字段名值对）。
+- 内嵌 JS 运行时自动连 `路径 + "/ws"`，断线 1s 重连，重连后自动恢复服务端状态；
+  整区替换时尽力保住输入框焦点与光标。
+- 渲染用户输入前先过 `转义HTML(文本)` 防注入。
+- 完整示例见 `examples/实时_计数器.qi`。
+
+## RPC（Connect 协议）
+
+`RPC.qi` 实现 [Connect 协议](https://connectrpc.com) 的**一元调用 + JSON 编码**
+——connect-go / connect-es / buf curl 等 gRPC 生态客户端可直连，普通 curl 也能打。
+**不是 protobuf 线格式**；protobuf 编码与流式 RPC 属后续。
+
+```qi
+函数 说你好(上下文值: 上下文, 请求JSON: 字符串) : 字符串 {
+    变量 请求对象: 整数 = J.解码(请求JSON);
+    变量 名字: 字符串 = J.获取字符串(请求对象, "name");
+    J.删除(请求对象);
+    如果 (字符串::字节长度(名字) == 0) {
+        返回 RPC错误("invalid_argument", "name 字段不能为空");   // → 400 + Connect 错误 JSON
+    }
+    返回 "{\"greeting\":\"你好, " + 名字 + "!\"}";
+}
+
+应用值 = 注册RPC(应用值, "greet.GreeterService", "SayHello", 说你好);
+// 挂载 POST /greet.GreeterService/SayHello（服务名/方法名用 ASCII）
+```
+
+```bash
+curl -X POST http://127.0.0.1:7429/greet.GreeterService/SayHello \
+     -H "Content-Type: application/json" -d '{"name":"世界"}'
+# {"greeting":"你好, 世界!"}
+```
+
+- 错误按 Connect 规范返回 `{"code":"...","message":"..."}` + 对应 HTTP 状态
+  （invalid_argument→400、unauthenticated→401、permission_denied→403、
+  not_found→404、already_exists→409、resource_exhausted→429、
+  unimplemented→501、unavailable→503、internal→500 等）。
+- 处理函数用 `RPC错误(错误码, 消息)` 生成错误返回值，正常路径直接返回响应 JSON。
+- `connect-protocol-version: 1` 请求头按规范忽略；`application/proto` 请求回 415。
+- 完整示例（含错误路径）见 `examples/rpc_问候.qi`。
+
 ## 现在的取舍
 
 当前版本优先把下面这条链路做稳：
@@ -394,6 +489,9 @@ qi-web/
 ├── 会话.qi
 ├── 认证.qi
 ├── 控制器.qi
+├── 事件流.qi
+├── 实时页面.qi
+├── RPC.qi
 └── examples/
     ├── 一等处理器.qi
     ├── 完整服务器.qi
@@ -401,5 +499,8 @@ qi-web/
     ├── 核心API.qi
     ├── 会话与认证.qi
     ├── 自定义中间件.qi
-    └── 路由分组.qi
+    ├── 路由分组.qi
+    ├── llm_聊天_SSE.qi
+    ├── 实时_计数器.qi
+    └── rpc_问候.qi
 ```

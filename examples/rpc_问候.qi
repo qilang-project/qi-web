@@ -1,0 +1,73 @@
+// RPC 示例：Connect 协议（JSON codec，unary）问候服务
+//
+// 挂载两个方法（服务名/方法名用 ASCII —— 路由 path 不能含中文）：
+//   POST /greet.GreeterService/SayHello    {"name":"世界"} → {"greeting":"你好, 世界!"}
+//   POST /greet.GreeterService/GetUser     {"id":1} → 用户对象；id 不存在 → not_found
+//
+// 验证（connect-go / connect-es / buf curl 也能直连）：
+//   curl -X POST http://127.0.0.1:7429/greet.GreeterService/SayHello \
+//        -H "Content-Type: application/json" -d '{"name":"世界"}'
+//   curl -X POST … -d '{}'          → 400 {"code":"invalid_argument",…}
+//   curl -X POST …/GetUser -d '{"id":99}' → 404 {"code":"not_found",…}
+包 主程序;
+
+导入 标准库.字符串;
+导入 标准库.JSON 作为 J;
+导入 Web::{
+    应用, 上下文, 创建应用, 配置,
+    注册RPC, RPC错误,
+    运行应用
+};
+
+// SayHello：{"name": "..."} → {"greeting": "你好, X!"}
+函数 说你好(上下文值: 上下文, 请求JSON: 字符串) : 字符串 {
+    变量 请求对象: 整数 = J.解码(请求JSON);
+    如果 (请求对象 <= 0) {
+        返回 RPC错误("invalid_argument", "请求体不是合法 JSON");
+    }
+    变量 名字: 字符串 = J.获取字符串(请求对象, "name");
+    J.删除(请求对象);
+
+    如果 (字符串::字节长度(名字) == 0) {
+        返回 RPC错误("invalid_argument", "name 字段不能为空");
+    }
+
+    // 经 J 对象构造响应，转义由 JSON 层保证
+    变量 响应对象: 整数 = J.创建对象();
+    J.设置字符串(响应对象, "greeting", "你好, " + 名字 + "!");
+    变量 响应文本: 字符串 = J.转字符串(响应对象);
+    J.删除(响应对象);
+    返回 响应文本;
+}
+
+// GetUser：{"id": N} → 用户对象；演示 not_found 错误路径
+函数 取用户(上下文值: 上下文, 请求JSON: 字符串) : 字符串 {
+    变量 请求对象: 整数 = J.解码(请求JSON);
+    如果 (请求对象 <= 0) {
+        返回 RPC错误("invalid_argument", "请求体不是合法 JSON");
+    }
+    变量 用户ID: 整数 = J.获取整数(请求对象, "id");
+    J.删除(请求对象);
+
+    如果 (用户ID != 1) {
+        返回 RPC错误("not_found", "用户 " + 整数转字符串(用户ID) + " 不存在");
+    }
+
+    变量 用户对象: 整数 = J.创建对象();
+    J.设置整数(用户对象, "id", 1);
+    J.设置字符串(用户对象, "name", "李亮");
+    J.设置字符串(用户对象, "role", "admin");
+    变量 响应文本: 字符串 = J.转字符串(用户对象);
+    J.删除(用户对象);
+    返回 响应文本;
+}
+
+函数 入口() {
+    变量 主机: 字符串 = "127.0.0.1";
+    变量 端口: 整数 = 7429;
+    变量 应用值: 应用 = 创建应用();
+    应用值 = 配置(应用值, 主机, 端口);
+    应用值 = 注册RPC(应用值, "greet.GreeterService", "SayHello", 说你好);
+    应用值 = 注册RPC(应用值, "greet.GreeterService", "GetUser", 取用户);
+    运行应用(应用值);
+}

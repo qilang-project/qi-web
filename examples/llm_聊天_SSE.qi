@@ -1,0 +1,138 @@
+// SSE + LLM 流式聊天示例
+//
+// GET /          聊天页（EventSource 读 SSE，token 渐显）
+// GET /chat?q=…  SSE 流：有 QI_LLM_KEY 时走 Harness 流式问（真 LLM token 流）；
+//                无 key 时降级为固定回复逐字符推送——不依赖网络也能跑通全链路。
+//
+// 跑：QI_PACKAGES_PATH=… qi run llm_聊天_SSE.qi
+//     可选环境变量：QI_LLM_KEY / QI_LLM_BASE(默认 api.deepseek.com) / QI_LLM_MODEL(默认 deepseek-chat)
+// 验证：curl -N "http://127.0.0.1:4172/chat?q=你好"
+包 主程序;
+
+导入 标准库.字符串;
+导入 标准库.时间;
+导入 标准库.操作系统 作为 系统;
+导入 标准库.字节切片 作为 缓冲;
+导入 Web::{
+    应用, 上下文, 响应,
+    创建应用, 配置, 获取, HTML, 查询参数, 百分号解码,
+    SSE开始, SSE发送, SSE结束, SSE完成响应,
+    运行应用
+};
+导入 Harness::{
+    模型配置, 大模型, 配置系统提示, 开启会话,
+    代理, 创建代理, 流式问, 关闭代理
+};
+
+// 聊天页：输入框 + EventSource 渐显回复
+函数 首页处理(上下文值: 上下文) : 响应 {
+    变量 页: 字符串 = "<!DOCTYPE html>\n<html>\n<head><meta charset=\"utf-8\"><title>Qi SSE 聊天</title>\n";
+    页 = 页 + "<style>body{font-family:sans-serif;max-width:640px;margin:40px auto;padding:0 16px}";
+    页 = 页 + "#log div{margin:8px 0;padding:8px 12px;border-radius:8px}";
+    页 = 页 + ".q{background:#e8f0fe}.a{background:#f5f5f5;white-space:pre-wrap}</style></head>\n<body>\n";
+    页 = 页 + "<h2>Qi SSE 聊天</h2>\n<div id=\"log\"></div>\n";
+    页 = 页 + "<input id=\"q\" placeholder=\"问点什么…\" style=\"width:70%\"> <button onclick=\"send()\">发送</button>\n";
+    页 = 页 + "<script>\n";
+    页 = 页 + "function send(){\n";
+    页 = 页 + "  var q=document.getElementById('q').value;if(!q){return;}\n";
+    页 = 页 + "  var log=document.getElementById('log');\n";
+    页 = 页 + "  var qd=document.createElement('div');qd.className='q';qd.textContent=q;log.appendChild(qd);\n";
+    页 = 页 + "  var ad=document.createElement('div');ad.className='a';log.appendChild(ad);\n";
+    页 = 页 + "  var es=new EventSource('/chat?q='+encodeURIComponent(q));\n";
+    页 = 页 + "  es.addEventListener('message',function(e){ad.textContent+=e.data;});\n";
+    页 = 页 + "  es.addEventListener('done',function(e){es.close();});\n";
+    页 = 页 + "  es.onerror=function(){es.close();};\n";
+    页 = 页 + "  document.getElementById('q').value='';\n";
+    页 = 页 + "}\n";
+    页 = 页 + "document.getElementById('q').addEventListener('keydown',function(e){if(e.key==='Enter'){send();}});\n";
+    页 = 页 + "</script>\n</body>\n</html>";
+    返回 HTML(页);
+}
+
+// UTF-8 首字节 → 该字符的字节数（子串 按字节切，必须按字符边界推进）
+函数 UTF8字符字节数(首字节: 整数) : 整数 {
+    如果 (首字节 < 128) { 返回 1; }
+    如果 (首字节 >= 240) { 返回 4; }
+    如果 (首字节 >= 224) { 返回 3; }
+    如果 (首字节 >= 192) { 返回 2; }
+    返回 1; // 续字节兜底（正常不会走到）
+}
+
+// 无 key 时的降级回复：逐字符 SSE 推送，模拟 token 流
+函数 降级流式(上下文值: 上下文, 问题: 字符串) {
+    变量 回复: 字符串 = "（离线演示模式，未配置 QI_LLM_KEY）你问的是「" + 问题
+        + "」。奇语是一门 100% 中文关键字的编译型语言：LLVM 后端、M:N 协程、"
+        + "自带 Web 框架与智能体框架。这段回复正逐字经 SSE 推送给你。";
+    变量 回复字节: 整数 = 缓冲::从字符串(回复);
+    变量 总长: 整数 = 缓冲::长度(回复字节);
+    变量 位置: 整数 = 0;
+    当 (位置 < 总长) {
+        变量 步长: 整数 = UTF8字符字节数(缓冲::获取(回复字节, 位置));
+        SSE发送(上下文值, "message", 字符串::子串(回复, 位置, 步长));
+        时间.睡眠毫秒(15);
+        位置 = 位置 + 步长;
+    }
+    缓冲::释放切片(回复字节);
+}
+
+// 有 key 时：Harness 流式问，token 片段实时经 SSE 下发
+函数 真流式(上下文值: 上下文, 问题: 字符串, 密钥: 字符串) {
+    变量 基址: 字符串 = 系统.获取环境变量("QI_LLM_BASE");
+    如果 (字符串::字节长度(基址) == 0) {
+        基址 = "https://api.deepseek.com";
+    }
+    变量 模型名: 字符串 = 系统.获取环境变量("QI_LLM_MODEL");
+    如果 (字符串::字节长度(模型名) == 0) {
+        模型名 = "deepseek-chat";
+    }
+
+    变量 配置值: 模型配置 = 大模型(基址, 密钥, 模型名);
+    配置值 = 配置系统提示(配置值, "你是奇语（Qi 编程语言）助手，回答简短准确。");
+    变量 会话: 整数 = 开启会话(配置值);
+    如果 (会话 <= 0) {
+        SSE发送(上下文值, "message", "[错误] LLM 会话开启失败");
+        返回;
+    }
+    变量 代理值: 代理 = 创建代理("SSE聊天", 会话);
+
+    // 块回调闭包按值捕获 上下文值 —— 每个 token 片段即时下发一帧 SSE
+    变量 推送片段: 函数(字符串): 整数 = 闭包(片段: 字符串): 整数 {
+        SSE发送(上下文值, "message", 片段);
+        返回 1;
+    };
+    流式问(代理值, 问题, 推送片段);
+    关闭代理(代理值);
+}
+
+// GET /chat?q=… —— SSE 流
+函数 聊天处理(上下文值: 上下文) : 响应 {
+    变量 问题: 字符串 = 百分号解码(查询参数(上下文值, "q"));
+    如果 (字符串::字节长度(问题) == 0) {
+        问题 = "介绍一下奇语";
+    }
+
+    SSE开始(上下文值);
+
+    变量 密钥: 字符串 = 系统.获取环境变量("QI_LLM_KEY");
+    如果 (字符串::字节长度(密钥) > 0) {
+        真流式(上下文值, 问题, 密钥);
+    } 否则 {
+        降级流式(上下文值, 问题);
+    }
+
+    // 结束事件：前端收到后 es.close()（EventSource 断连默认会自动重连重放）
+    SSE发送(上下文值, "done", "[完成]");
+    SSE结束(上下文值);
+    返回 SSE完成响应();
+}
+
+函数 入口() {
+    变量 主机: 字符串 = "127.0.0.1";
+    变量 端口: 整数 = 4172;
+    变量 应用值: 应用 = 创建应用();
+    应用值 = 配置(应用值, 主机, 端口);
+    应用值 = 获取(应用值, "/", 首页处理);
+    应用值 = 获取(应用值, "/chat", 聊天处理);
+    // SSE 依赖 ctx.客户端句柄，必须用同步 运行应用（异步路径不支持流式）
+    运行应用(应用值);
+}

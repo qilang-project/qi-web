@@ -112,6 +112,52 @@ metadata:
 - **请求侧**：自动识别 `Transfer-Encoding: chunked` 并去分块（如 Caddy h2→h1 转发场景），业务无感。
 - **响应侧**（字节精确，可发二进制）：`流开始(客户端句柄, 状态码, 状态文本, 内容类型)` → 多次 `流发送块(句柄, 字节句柄)` / `流发送文本块(句柄, 文本)` → 发 0 块结束。见 `examples/流式响应.qi`。
 
+## SSE 事件流（事件流.qi）
+
+在 chunked 流式之上的 Server-Sent Events；只支持同步 `运行应用`（依赖 `ctx.客户端句柄`）。
+
+```qi
+SSE开始(上下文值)                          // 写 text/event-stream 头，返回 <0 失败
+SSE发送(上下文值, "message", 数据)          // event+data 帧；数据内换行自动拆多条 data:
+SSE发送数据(上下文值, 数据)                 // 无事件名（默认 message）
+SSE发送带ID(上下文值, 事件ID, 事件名, 数据)  // 带 id: 行
+SSE注释(上下文值, "keepalive")             // ": ..." 注释行，可作心跳
+SSE结束(上下文值)                          // chunked 终止块，之后框架关连接
+返回 SSE完成响应();                        // 状态码 0 = handler 已自行写完
+```
+
+EventSource 断连会自动重连重放——一次性流发 `done` 之类结束事件让前端 `es.close()`。LLM 流式聊天示例 `examples/llm_聊天_SSE.qi`（qi-harness `流式问` 的块回调里直接 `SSE发送`）。
+
+## 实时页面（实时页面.qi，LiveView 式）
+
+服务端状态 + WS 事件上行 + 整区重渲染下行（v1 无 DOM diff）。必须同步 `运行应用`；路由路径用 ASCII。
+
+```qi
+// 三个用户函数：状态是 标准库.JSON 对象句柄
+函数 初始状态() : 整数                                  // J.创建对象() 建每连接状态
+函数 渲染(状态: 整数) : 字符串                           // 状态 → HTML 片段
+函数 处理事件(状态: 整数, 事件名: 字符串, 载荷JSON: 字符串) : 整数  // 返回新/同状态句柄
+
+应用值 = 实时路由(应用值, "/", 初始状态, 渲染, 处理事件);  // GET / + WS /ws
+转义HTML(文本)                                          // 渲染用户输入前防注入
+```
+
+HTML 里声明式绑定（事件委托，替换后无需重绑）：`data-点击="事件名"`、`data-输入="事件名"`（载荷 `{"value":…}`）、`data-提交="事件名"`（载荷为表单字段）。断线 1s 自动重连并恢复渲染。示例 `examples/实时_计数器.qi`。
+
+## RPC（RPC.qi，Connect 协议 JSON 一元）
+
+Connect 协议 unary + JSON codec（connect-go/connect-es/buf curl 可直连）；**非 protobuf 线格式**，流式 RPC 属后续。服务名/方法名用 ASCII。
+
+```qi
+// 处理函数：收请求 JSON 串，回响应 JSON 串
+函数 说你好(上下文值: 上下文, 请求JSON: 字符串) : 字符串
+应用值 = 注册RPC(应用值, "greet.GreeterService", "SayHello", 说你好);
+// → POST /greet.GreeterService/SayHello (Content-Type: application/json)
+返回 RPC错误("invalid_argument", "说明");   // → 400 + {"code":…,"message":…}
+```
+
+错误码映射（Connect 规范子集）：invalid_argument/failed_precondition/out_of_range→400、unauthenticated→401、permission_denied→403、not_found→404、deadline_exceeded→408、already_exists/aborted→409、resource_exhausted→429、unimplemented→501、unavailable→503、其余→500。`application/proto` 请求回 415。示例 `examples/rpc_问候.qi`。
+
 ## 中间件
 
 ```qi

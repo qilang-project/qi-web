@@ -1,0 +1,134 @@
+// Qi Web - RPC（Connect 协议 · 一元调用 · JSON 编码）
+//
+// 诚实定位：这是 **Connect 协议（https://connectrpc.com）的 unary + JSON codec**
+// 实现，不是 protobuf 线格式的经典 gRPC。gRPC 生态里讲 Connect 协议的客户端
+// （connect-go / connect-es / buf curl）可以直连，普通 curl 也能打：
+//
+//   curl -X POST http://host:port/greet.GreeterService/SayHello \
+//        -H "Content-Type: application/json" -d '{"name":"世界"}'
+//
+// protobuf 二进制编码与流式 RPC（server-streaming / bidi）属后续版本。
+//
+// 用法：
+//   函数 说你好(上下文值: 上下文, 请求JSON: 字符串) : 字符串 {
+//       // 解析请求JSON，业务处理，返回响应 JSON；
+//       // 出错时 返回 RPC错误("invalid_argument", "说明")
+//   }
+//   应用值 = 注册RPC(应用值, "greet.GreeterService", "SayHello", 说你好);
+//
+// 错误约定：处理函数返回以 "#RPC-ERR#" 开头的字符串表示错误——
+//   "#RPC-ERR#" + 错误码 + "\n" + 消息（用 RPC错误 帮助函数生成，别手拼）。
+// 框架据此发 Connect 规范错误：JSON {"code":"...","message":"..."} +
+// 对应 HTTP 状态码。正常返回的响应 JSON 以 {/[/" 开头，不会与前缀撞车。
+//
+// 注意：服务名/方法名用 ASCII（含中文的路由 path 在 Rust 镜像表会 panic）。
+// 请求头里的 connect-protocol-version: 1 按规范可忽略，这里不校验。
+包 Web;
+
+导入 标准库.字符串;
+导入 标准库.JSON 作为 J;
+
+// 错误串前缀（内部约定；处理函数经 RPC错误 生成，不要依赖字面量）
+函数 RPC错误前缀() : 字符串 {
+    返回 "#RPC-ERR#";
+}
+
+// 生成错误返回值。错误码用 Connect/gRPC 规范码（全小写下划线），常用：
+// invalid_argument / unauthenticated / permission_denied / not_found /
+// already_exists / resource_exhausted / unimplemented / unavailable / internal
+公开 函数 RPC错误(错误码: 字符串, 消息: 字符串) : 字符串 {
+    返回 RPC错误前缀() + 错误码 + "\n" + 消息;
+}
+
+// 注册一个 RPC 方法：挂载 POST /服务名/方法名。
+// 处理函数签名：函数(上下文, 字符串): 字符串 —— 收请求 JSON，回响应 JSON。
+公开 函数 注册RPC(应用值: 应用, 服务名: 字符串, 方法名: 字符串, 处理函数: 函数(上下文, 字符串): 字符串) : 应用 {
+    变量 路径: 字符串 = "/" + 服务名 + "/" + 方法名;
+    变量 包装: 函数(上下文): 响应 = 闭包(上下文值: 上下文): 响应 {
+        // Connect JSON codec 只认 application/json；显式要 proto 的请求
+        // 按规范回 415（本实现不支持 protobuf 编码）
+        变量 内容类型: 字符串 = 字符串::转小写(请求头(上下文值, "Content-Type"));
+        如果 (字符串::包含(内容类型, "proto") == 1) {
+            返回 构造RPC错误体(415, "Unsupported Media Type",
+                "unimplemented", "本服务只支持 Connect JSON 编码 (application/json)");
+        }
+
+        变量 请求体: 字符串 = 请求主体(上下文值);
+        如果 (字符串::字节长度(请求体) == 0) {
+            // 空 body 等价空消息（如无字段请求）
+            请求体 = "{}";
+        }
+
+        变量 结果值: 字符串 = 处理函数(上下文值, 请求体);
+        如果 (字符串::开始于(结果值, RPC错误前缀()) == 1) {
+            返回 解析RPC错误(结果值);
+        }
+        返回 JSON(结果值);
+    };
+    返回 提交(应用值, 路径, 包装);
+}
+
+// ── 错误响应构造 ────────────────────────────────────────────────
+
+// 把 "#RPC-ERR#code\nmessage" 解析成 Connect 错误响应
+函数 解析RPC错误(错误串: 字符串) : 响应 {
+    // 前缀是纯 ASCII，字符位置与字节位置一致，子串从位置 安全
+    变量 剩余: 字符串 = 字符串::子串从位置(错误串, 字符串::字节长度(RPC错误前缀()));
+    变量 换行位置: 整数 = 字符串::查找(剩余, "\n");
+    变量 错误码: 字符串 = 剩余;
+    变量 消息: 字符串 = "";
+    如果 (换行位置 >= 0) {
+        错误码 = 字符串::子串(剩余, 0, 换行位置);
+        消息 = 字符串::子串从位置(剩余, 换行位置 + 1);
+    }
+    变量 状态码: 整数 = RPC错误码转状态(错误码);
+    返回 构造RPC错误体(状态码, HTTP状态文本(状态码), 错误码, 消息);
+}
+
+// Connect 规范错误响应：JSON {"code","message"} + 对应 HTTP 状态
+函数 构造RPC错误体(状态码: 整数, 状态文本: 字符串, 错误码: 字符串, 消息: 字符串) : 响应 {
+    // 经 J 对象序列化，消息里的引号/换行由 JSON 层转义
+    变量 错误对象: 整数 = J.创建对象();
+    J.设置字符串(错误对象, "code", 错误码);
+    J.设置字符串(错误对象, "message", 消息);
+    变量 主体: 字符串 = J.转字符串(错误对象);
+    J.删除(错误对象);
+    返回 新建 响应 {
+        状态码: 状态码,
+        状态文本: 状态文本,
+        头部: "Content-Type: application/json",
+        主体: 主体
+    };
+}
+
+// Connect 规范的错误码 → HTTP 状态映射（常用子集；未知码按 internal 处理）
+函数 RPC错误码转状态(错误码: 字符串) : 整数 {
+    如果 (字符串::等于(错误码, "invalid_argument") == 1) { 返回 400; }
+    如果 (字符串::等于(错误码, "failed_precondition") == 1) { 返回 400; }
+    如果 (字符串::等于(错误码, "out_of_range") == 1) { 返回 400; }
+    如果 (字符串::等于(错误码, "unauthenticated") == 1) { 返回 401; }
+    如果 (字符串::等于(错误码, "permission_denied") == 1) { 返回 403; }
+    如果 (字符串::等于(错误码, "not_found") == 1) { 返回 404; }
+    如果 (字符串::等于(错误码, "deadline_exceeded") == 1) { 返回 408; }
+    如果 (字符串::等于(错误码, "already_exists") == 1) { 返回 409; }
+    如果 (字符串::等于(错误码, "aborted") == 1) { 返回 409; }
+    如果 (字符串::等于(错误码, "resource_exhausted") == 1) { 返回 429; }
+    如果 (字符串::等于(错误码, "unimplemented") == 1) { 返回 501; }
+    如果 (字符串::等于(错误码, "unavailable") == 1) { 返回 503; }
+    // internal / unknown / data_loss / 未识别 → 500
+    返回 500;
+}
+
+函数 HTTP状态文本(状态码: 整数) : 字符串 {
+    如果 (状态码 == 400) { 返回 "Bad Request"; }
+    如果 (状态码 == 401) { 返回 "Unauthorized"; }
+    如果 (状态码 == 403) { 返回 "Forbidden"; }
+    如果 (状态码 == 404) { 返回 "Not Found"; }
+    如果 (状态码 == 408) { 返回 "Request Timeout"; }
+    如果 (状态码 == 409) { 返回 "Conflict"; }
+    如果 (状态码 == 415) { 返回 "Unsupported Media Type"; }
+    如果 (状态码 == 429) { 返回 "Too Many Requests"; }
+    如果 (状态码 == 501) { 返回 "Not Implemented"; }
+    如果 (状态码 == 503) { 返回 "Service Unavailable"; }
+    返回 "Internal Server Error";
+}
