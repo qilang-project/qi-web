@@ -1,9 +1,10 @@
 // Qi Web - 实时页面（Phoenix LiveView 式服务端驱动 UI）
 //
-// v1 诚实定位：**服务端状态 + WebSocket 事件上行 + 整区重渲染下行**。
-// 不做 DOM diff——每次事件后服务端重渲染整个片段，客户端整体替换
-// #qi-live 的 innerHTML（并尽力保住输入框焦点/光标）。中小页面这个
-// 取舍完全够用；DOM diff / 局部 patch 属后续版本。
+// v2：**服务端状态 + WebSocket 事件上行 + DOM morph 局部 patch 下行**。
+// 服务端每次事件后仍重渲染整个片段，但客户端不再整区替换 innerHTML，
+// 而是用内嵌的 morph 算法把新旧 DOM 树逐节点对齐：只改动有差异的
+// 属性/文本/节点，未变的元素保持身份不变——焦点、光标、滚动位置、
+// CSS 过渡、第三方挂件全都天然保住。
 //
 // 一个实时页面由三个用户函数构成（每连接状态用 标准库.JSON 对象句柄承载）：
 //   初始状态函数() : 整数                      —— 建一个 J 对象作为该连接的状态
@@ -14,20 +15,41 @@
 //   应用值 = 实时路由(应用值, "/", 初始状态, 渲染, 处理事件);
 //   运行应用(应用值);   // 注意：实时页面依赖 WS 升级，必须用同步 运行应用
 //
-// 协议（内嵌 JS 运行时 ↔ 服务端，均 JSON 文本帧）：
+// ── 客户端声明式绑定（事件委托，morph 后无需重绑）─────────────────
+//   data-点击="事件名"        click 上行，载荷 = 该元素全部 data-值-* 属性
+//   data-输入="事件名"        input 上行，载荷 = data-值-* + {"value": 当前值}
+//     data-防抖="300"           可选：输入事件防抖毫秒数（对标 phx-debounce）
+//   data-按键="事件名"        keyup 上行，载荷 = data-值-* + {"key","value"}
+//     data-按键筛选="Enter"     可选：只有该键触发（对标 phx-keyup + key 过滤）
+//     data-按键清空             可选：触发后清空该输入框（回车提交场景）
+//   data-提交="事件名"        表单 submit 上行，载荷 = data-值-* + 各字段名值对
+//   data-值-xxx="v"           事件参数（对标 phx-value-*），键为 xxx
+//   data-键="k"               morph 列表对齐键（对标 LiveView keyed comprehension）
+//   data-静止                 morph 跳过该元素子树（对标 phx-update="ignore"）
+//
+// ── 协议（内嵌 JS 运行时 ↔ 服务端，均 JSON 文本帧）────────────────
 //   上行  {"事件":"加一","载荷":{...}}
-//   下行  {"html":"<div>...</div>"}     —— 客户端替换 #qi-live 内容
+//   下行  {"html":"<div>...</div>"}          —— morph 进 #qi-live
+//   下行  {"指令":[{"类型":"标题",...},...]}  —— 浏览器侧指令（见下）
 // 连接建立后服务端先推一帧初始渲染（断线重连后页面自动恢复到服务端状态）。
 //
-// 客户端声明式事件绑定（事件委托，动态替换后的元素无需重绑）：
-//   data-点击="事件名"   —— click 上行，载荷 {}
-//   data-输入="事件名"   —— input/change 上行，载荷 {"value": 当前值}
-//   data-提交="事件名"   —— 表单 submit 上行，载荷为各字段名值对
+// ── 服务端指令（对标 push_event / push_navigate）───────────────────
+// 事件处理里往状态句柄挂指令，本轮渲染帧之后自动下发：
+//   实时指令(状态, 指令_标题("新标题"));
+//   实时指令(状态, 指令_跳转("/somewhere"));
+//   实时指令(状态, 指令_滚动("#chat-bottom"));          // scrollIntoView
+//   实时指令(状态, 指令_事件("提示", "{\"文本\":\"已保存\"}"));
+//     // 客户端 window 上派发 CustomEvent "qi:提示"，detail 为解析后的载荷
+// 状态键 "__指令__" 为本模块保留，渲染函数不要使用。
 //
-// 限制（v1）：
+// ── 连接状态钩子 ──────────────────────────────────────────────────
+// 断线时 <body> 加 class "qi-断线"（重连成功移除），并在 window 上派发
+// CustomEvent "qi:断线"/"qi:连接"；重连为指数退避（0.5s 起，8s 封顶）。
+// 触发事件的元素在等待服务端回帧期间带 class "qi-加载中"（对标 phx-click-loading）。
+//
+// 限制：
 // - 路由路径用 ASCII（含中文的路由 path 在 Rust 镜像表会 panic）
-// - 每个 WS 连接一份独立状态；连接断开状态即释放，无跨连接共享/广播
-// - 断线重连为固定 1 秒退避
+// - 每连接一份独立状态；连接断开状态即释放。跨连接共享/广播见 实时广播.qi
 包 Web;
 
 导入 标准库.字符串;
@@ -77,6 +99,7 @@
 
     // 连接建立即推一帧当前渲染：断线重连后页面自动回到服务端状态
     实时发送整区(ws句柄, 渲染函数(状态));
+    发送待发指令(ws句柄, 状态);
 
     变量 继续循环: 整数 = 1;
     当 (继续循环 == 1 与 WS::已连接(ws句柄) == 1) {
@@ -100,6 +123,7 @@
                     // 事件处理可能返回新句柄（换状态），也可能原样返回
                     状态 = 事件处理函数(状态, 事件名, 载荷串);
                     实时发送整区(ws句柄, 渲染函数(状态));
+                    发送待发指令(ws句柄, 状态);
                 }
                 J.删除(消息对象);
             }
@@ -121,6 +145,75 @@
     返回 WS::发送文本(ws句柄, 帧文本);
 }
 
+// ── 服务端指令（下行给浏览器执行）────────────────────────────────
+//
+// 指令是 JSON 对象文本；实时指令 把它挂到状态的保留键 "__指令__" 上
+// （逗号级联），事件循环在渲染帧之后打包成 {"指令":[...]} 一帧下发并清空。
+
+// 往状态挂一条待发指令。事件处理函数内调用。
+公开 函数 实时指令(状态: 整数, 指令文本: 字符串) : 整数 {
+    变量 已有: 字符串 = "";
+    如果 (J.是否包含键(状态, "__指令__") == 1) {
+        已有 = J.获取字符串(状态, "__指令__");
+    }
+    如果 (字符串::字节长度(已有) > 0) {
+        已有 = 已有 + ",";
+    }
+    J.设置字符串(状态, "__指令__", 已有 + 指令文本);
+    返回 1;
+}
+
+// 浏览器跳转到 目标 URL（对标 push_navigate）
+公开 函数 指令_跳转(目标: 字符串) : 字符串 {
+    返回 指令两字段("跳转", "目标", 目标);
+}
+
+// 改浏览器标签页标题
+公开 函数 指令_标题(文本: 字符串) : 字符串 {
+    返回 指令两字段("标题", "文本", 文本);
+}
+
+// 把匹配 CSS 选择器的元素平滑滚进视口（聊天滚到底等场景）
+公开 函数 指令_滚动(目标: 字符串) : 字符串 {
+    返回 指令两字段("滚动", "目标", 目标);
+}
+
+// 在 window 上派发 CustomEvent "qi:<名称>"，detail 为解析后的 载荷JSON
+// （对标 push_event；页面自己的 JS 用 addEventListener('qi:名称', ...) 接）
+公开 函数 指令_事件(名称: 字符串, 载荷JSON: 字符串) : 字符串 {
+    变量 对象: 整数 = J.创建对象();
+    J.设置字符串(对象, "类型", "事件");
+    J.设置字符串(对象, "名称", 名称);
+    J.设置字符串(对象, "载荷文本", 载荷JSON);
+    变量 文本: 字符串 = J.转字符串(对象);
+    J.删除(对象);
+    返回 文本;
+}
+
+// {"类型":类型值, 键:值} —— 经 J 序列化保证转义
+函数 指令两字段(类型值: 字符串, 键: 字符串, 值: 字符串) : 字符串 {
+    变量 对象: 整数 = J.创建对象();
+    J.设置字符串(对象, "类型", 类型值);
+    J.设置字符串(对象, 键, 值);
+    变量 文本: 字符串 = J.转字符串(对象);
+    J.删除(对象);
+    返回 文本;
+}
+
+// 状态上有待发指令则打包 {"指令":[...]} 下发并清空。指令文本本身是合法
+// JSON 对象串（由 指令_* 构造，转义已由 J 层保证），手工拼数组括号是安全的。
+公开 函数 发送待发指令(ws句柄: 整数, 状态: 整数) : 整数 {
+    如果 (J.是否包含键(状态, "__指令__") == 0) {
+        返回 0;
+    }
+    变量 已有: 字符串 = J.获取字符串(状态, "__指令__");
+    如果 (字符串::字节长度(已有) == 0) {
+        返回 0;
+    }
+    J.设置字符串(状态, "__指令__", "");
+    返回 WS::发送文本(ws句柄, "{\"指令\":[" + 已有 + "]}");
+}
+
 // ── 页面布局与内嵌 JS 运行时 ────────────────────────────────────
 
 // 完整 HTML 页：<div id="qi-live">初始渲染</div> + JS 运行时。
@@ -137,50 +230,144 @@
     返回 页;
 }
 
-// 内嵌 JS 运行时（无依赖）：
-// - 自动连同 host 的 WS；断线 1s 后重连
-// - 事件委托：data-点击 / data-输入 / data-提交 三种声明式绑定
-// - 收到 {html} 帧 → 替换 #qi-live 内容，并尽力恢复输入焦点/光标
+// 每连接独立状态模式的运行时（无订阅帧、无心跳）
 公开 函数 实时运行时脚本(WS路径: 字符串) : 字符串 {
+    返回 实时运行时构建(WS路径, "", 0);
+}
+
+// ── 内嵌 JS 运行时构建器（实时页面 与 实时广播 共用）──────────────
+//
+// 订阅载荷JSON 非空 = 广播模式：连上先发 {"事件":"__订阅__"}，可选心跳保活，
+// 事件载荷自动并入订阅里的 昵称/成员id，表单提交后 reset。
+// 订阅载荷JSON 为空串 = 每连接独立状态模式：连上即收初始渲染。
+//
+// 运行时能力：
+// - morph 局部 patch（data-键 对齐 / data-静止 跳过），焦点光标天然保留
+// - 事件委托绑定：data-点击 / data-输入(+data-防抖) / data-按键(+筛选) / data-提交
+// - data-值-* 事件参数并入载荷
+// - {"指令":[...]} 帧：跳转/标题/滚动/事件(CustomEvent qi:名称)
+// - 断线指数退避重连（0.5s→8s），body.qi-断线 + qi:连接/qi:断线 事件
+// - 触发元素等待回帧期间带 class qi-加载中
+公开 函数 实时运行时构建(ws路径: 字符串, 订阅载荷JSON: 字符串, 心跳毫秒: 整数) : 字符串 {
     变量 s: 字符串 = "<script>\n(function(){\n";
-    s = s + "var wsPath='" + WS路径 + "';\n";
-    s = s + "var ws=null;\n";
+    s = s + "var wsPath='" + ws路径 + "';\n";
+    如果 (字符串::字节长度(订阅载荷JSON) > 0) {
+        s = s + "var sub=" + 订阅载荷JSON + ";\n";
+    } 否则 {
+        s = s + "var sub=null;\n";
+    }
+    s = s + "var hb=" + 整数转字符串(心跳毫秒) + ";\n";
+    s = s + "var ws=null,hbTimer=null,delay=500,pending=[];\n";
+    // ── 上行 ──
+    s = s + "function ident(p){p=p||{};if(sub){if(sub['昵称']!==undefined)p['昵称']=sub['昵称'];";
+    s = s + "if(sub['成员id']!==undefined)p['成员id']=sub['成员id'];}return p;}\n";
+    s = s + "function vals(el){var p={},i,a;if(!el||!el.attributes)return p;\n";
+    s = s + "  for(i=0;i<el.attributes.length;i++){a=el.attributes[i];\n";
+    s = s + "    if(a.name.indexOf('data-值-')===0){p[a.name.slice(7)]=a.value;}}\n";
+    s = s + "  return p;}\n";
+    s = s + "function mark(el){if(el&&el.classList){el.classList.add('qi-加载中');pending.push(el);}}\n";
+    s = s + "function clearLoad(){for(var i=0;i<pending.length;i++){try{pending[i].classList.remove('qi-加载中');}catch(e){}}pending=[];}\n";
+    s = s + "function send(ev,payload,el){if(ws&&ws.readyState===1){mark(el);";
+    s = s + "ws.send(JSON.stringify({'事件':ev,'载荷':ident(payload)}));}}\n";
+    s = s + "function sendRaw(ev,payload){if(ws&&ws.readyState===1){";
+    s = s + "ws.send(JSON.stringify({'事件':ev,'载荷':payload||{}}));}}\n";
+    // ── morph：新旧 DOM 树逐节点对齐，只动差异 ──
+    s = s + "function nkey(n){return n.nodeType===1?n.getAttribute('data-键'):null;}\n";
+    s = s + "function same(a,b){return a.nodeType===b.nodeType&&(a.nodeType!==1||a.tagName===b.tagName);}\n";
+    s = s + "function syncAttrs(f,t){\n";
+    s = s + "  var i,a;\n";
+    s = s + "  for(i=f.attributes.length-1;i>=0;i--){a=f.attributes[i].name;\n";
+    s = s + "    if(!t.hasAttribute(a)){f.removeAttribute(a);}}\n";
+    s = s + "  for(i=0;i<t.attributes.length;i++){a=t.attributes[i];\n";
+    s = s + "    if(f.getAttribute(a.name)!==a.value){f.setAttribute(a.name,a.value);}}\n";
+    // 表单控件的活值：非焦点元素跟随服务端；焦点元素不动（保住正在输入的值）
+    s = s + "  var g=f.tagName;\n";
+    s = s + "  if((g==='INPUT'||g==='TEXTAREA'||g==='SELECT')&&f!==document.activeElement){\n";
+    s = s + "    if(g==='INPUT'&&(f.type==='checkbox'||f.type==='radio')){f.checked=t.hasAttribute('checked');}\n";
+    s = s + "    else if(t.value!==undefined&&f.value!==t.value){f.value=t.value;}}\n";
+    s = s + "}\n";
+    s = s + "function morph(f,t){\n";
+    s = s + "  if(!same(f,t)){f.parentNode.replaceChild(t.cloneNode(true),f);return;}\n";
+    s = s + "  if(f.nodeType===3||f.nodeType===8){if(f.nodeValue!==t.nodeValue){f.nodeValue=t.nodeValue;}return;}\n";
+    s = s + "  if(f.nodeType!==1){return;}\n";
+    s = s + "  syncAttrs(f,t);\n";
+    s = s + "  if(f.hasAttribute('data-静止')){return;}\n";
+    s = s + "  morphKids(f,t);\n";
+    s = s + "}\n";
+    s = s + "function morphKids(f,t){\n";
+    s = s + "  var byKey={},n,k;\n";
+    s = s + "  for(n=f.firstChild;n;n=n.nextSibling){k=nkey(n);if(k){byKey[k]=n;}}\n";
+    s = s + "  var cur=f.firstChild,tn=t.firstChild;\n";
+    s = s + "  while(tn){\n";
+    s = s + "    var nxt=tn.nextSibling,tk=nkey(tn),m=tk?byKey[tk]:null;\n";
+    s = s + "    if(m){if(m===cur){cur=cur.nextSibling;}else{f.insertBefore(m,cur);}morph(m,tn);}\n";
+    s = s + "    else if(cur&&same(cur,tn)&&!nkey(cur)){var c=cur;cur=cur.nextSibling;morph(c,tn);}\n";
+    s = s + "    else{f.insertBefore(tn.cloneNode(true),cur);}\n";
+    s = s + "    tn=nxt;\n";
+    s = s + "  }\n";
+    s = s + "  while(cur){var d=cur;cur=cur.nextSibling;f.removeChild(d);}\n";
+    s = s + "}\n";
+    // ── 下行帧处理：html → morph；指令 → 逐条执行 ──
+    s = s + "function runCmd(c){if(!c||!c['类型']){return;}var t=c['类型'];\n";
+    s = s + "  if(t==='跳转'){location.href=c['目标'];}\n";
+    s = s + "  else if(t==='标题'){document.title=c['文本'];}\n";
+    s = s + "  else if(t==='滚动'){var el=document.querySelector(c['目标']);\n";
+    s = s + "    if(el){try{el.scrollIntoView({behavior:'smooth',block:'end'});}catch(e){el.scrollIntoView();}}}\n";
+    s = s + "  else if(t==='事件'){var d=null;try{d=JSON.parse(c['载荷文本']||'null');}catch(e){}\n";
+    s = s + "    try{window.dispatchEvent(new CustomEvent('qi:'+c['名称'],{detail:d}));}catch(e2){}}\n";
+    s = s + "}\n";
+    s = s + "function apply(m){\n";
+    s = s + "  if(m.html!==undefined){var live=document.getElementById('qi-live');\n";
+    s = s + "    if(live){var box=document.createElement('div');box.innerHTML=m.html;morphKids(live,box);}\n";
+    s = s + "    clearLoad();}\n";
+    s = s + "  if(m['指令']!==undefined&&m['指令'].forEach){m['指令'].forEach(runCmd);}\n";
+    s = s + "}\n";
+    // ── 连接与重连（指数退避）──
     s = s + "function connect(){\n";
     s = s + "  var proto=location.protocol==='https:'?'wss://':'ws://';\n";
     s = s + "  ws=new WebSocket(proto+location.host+wsPath);\n";
-    s = s + "  ws.onmessage=function(e){\n";
-    s = s + "    var m;try{m=JSON.parse(e.data);}catch(err){return;}\n";
-    s = s + "    if(m.html===undefined){return;}\n";
-    s = s + "    var live=document.getElementById('qi-live');\n";
-    s = s + "    if(!live){return;}\n";
-    // 整区替换会打断正在输入的 input——先记住焦点元素的 data-输入 键、
-    // 值与光标位置，替换后找同键元素恢复
-    s = s + "    var f=document.activeElement,fk=null,fv=null,s1=null,s2=null;\n";
-    s = s + "    if(f&&f.getAttribute){fk=f.getAttribute('data-输入');fv=f.value;\n";
-    s = s + "      try{s1=f.selectionStart;s2=f.selectionEnd;}catch(e2){}}\n";
-    s = s + "    live.innerHTML=m.html;\n";
-    s = s + "    if(fk){var nf=live.querySelector('[data-输入=\"'+fk+'\"]');\n";
-    s = s + "      if(nf){nf.focus();if(fv!==null&&fv!==undefined){nf.value=fv;}\n";
-    s = s + "        if(s1!==null){try{nf.setSelectionRange(s1,s2);}catch(e3){}}}}\n";
+    s = s + "  ws.onopen=function(){delay=500;\n";
+    s = s + "    document.body.classList.remove('qi-断线');\n";
+    s = s + "    try{window.dispatchEvent(new CustomEvent('qi:连接'));}catch(e){}\n";
+    s = s + "    if(sub){sendRaw('__订阅__',sub);}\n";
+    s = s + "    if(hbTimer){clearInterval(hbTimer);}\n";
+    s = s + "    if(sub&&hb>0){hbTimer=setInterval(function(){sendRaw('__心跳__',{});},hb);}\n";
     s = s + "  };\n";
-    s = s + "  ws.onclose=function(){setTimeout(connect,1000);};\n";
+    s = s + "  ws.onmessage=function(e){var m;try{m=JSON.parse(e.data);}catch(err){return;}apply(m);};\n";
+    s = s + "  ws.onclose=function(){if(hbTimer){clearInterval(hbTimer);}\n";
+    s = s + "    document.body.classList.add('qi-断线');\n";
+    s = s + "    try{window.dispatchEvent(new CustomEvent('qi:断线'));}catch(e){}\n";
+    s = s + "    setTimeout(connect,delay);delay=Math.min(delay*2,8000);};\n";
     s = s + "}\n";
-    s = s + "function send(ev,payload){\n";
-    s = s + "  if(ws&&ws.readyState===1){ws.send(JSON.stringify({'事件':ev,'载荷':payload||{}}));}\n";
-    s = s + "}\n";
+    // ── 事件委托绑定 ──
     s = s + "document.addEventListener('click',function(e){\n";
-    s = s + "  var el=e.target.closest('[data-点击]');\n";
-    s = s + "  if(el){send(el.getAttribute('data-点击'),{});}\n";
+    s = s + "  var el=e.target.closest?e.target.closest('[data-点击]'):null;\n";
+    s = s + "  if(el){send(el.getAttribute('data-点击'),vals(el),el);}\n";
     s = s + "});\n";
     s = s + "document.addEventListener('input',function(e){\n";
-    s = s + "  var el=e.target.closest('[data-输入]');\n";
-    s = s + "  if(el){send(el.getAttribute('data-输入'),{value:el.value});}\n";
+    s = s + "  var el=e.target.closest?e.target.closest('[data-输入]'):null;\n";
+    s = s + "  if(!el){return;}\n";
+    s = s + "  var p=vals(el);p.value=el.value;\n";
+    s = s + "  var ms=parseInt(el.getAttribute('data-防抖')||'0',10);\n";
+    s = s + "  if(ms>0){if(el.__qiT){clearTimeout(el.__qiT);}\n";
+    s = s + "    el.__qiT=setTimeout(function(){send(el.getAttribute('data-输入'),p,el);},ms);}\n";
+    s = s + "  else{send(el.getAttribute('data-输入'),p,el);}\n";
+    s = s + "});\n";
+    s = s + "document.addEventListener('keyup',function(e){\n";
+    s = s + "  var el=e.target.closest?e.target.closest('[data-按键]'):null;\n";
+    s = s + "  if(!el){return;}\n";
+    s = s + "  var f2=el.getAttribute('data-按键筛选');\n";
+    s = s + "  if(f2&&f2!==e.key){return;}\n";
+    s = s + "  var p=vals(el);p.key=e.key;if(el.value!==undefined){p.value=el.value;}\n";
+    s = s + "  send(el.getAttribute('data-按键'),p,el);\n";
+    s = s + "  if(el.hasAttribute('data-按键清空')){el.value='';}\n";
     s = s + "});\n";
     s = s + "document.addEventListener('submit',function(e){\n";
-    s = s + "  var f4=e.target.closest('[data-提交]');\n";
-    s = s + "  if(f4){e.preventDefault();var d={};\n";
+    s = s + "  var f4=e.target.closest?e.target.closest('[data-提交]'):null;\n";
+    s = s + "  if(f4){e.preventDefault();var d=vals(f4);\n";
     s = s + "    new FormData(f4).forEach(function(v,k){d[k]=v;});\n";
-    s = s + "    send(f4.getAttribute('data-提交'),d);}\n";
+    s = s + "    send(f4.getAttribute('data-提交'),d,f4);\n";
+    s = s + "    if(sub){f4.reset();}}\n";
     s = s + "});\n";
     s = s + "connect();\n";
     s = s + "})();\n</script>";
