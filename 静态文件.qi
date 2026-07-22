@@ -6,15 +6,24 @@
 变量 默认静态目录: 字符串 = "";
 变量 默认静态前缀: 字符串 = "/static";
 
-函数 静态内容类型(文件路径: 字符串) : 字符串 {
-    如果 (字符串::结束于(文件路径, ".html") == 1) { 返回 "text/html; charset=utf-8"; }
-    如果 (字符串::结束于(文件路径, ".css") == 1) { 返回 "text/css; charset=utf-8"; }
-    如果 (字符串::结束于(文件路径, ".js") == 1) { 返回 "application/javascript; charset=utf-8"; }
-    如果 (字符串::结束于(文件路径, ".json") == 1) { 返回 "application/json; charset=utf-8"; }
-    如果 (字符串::结束于(文件路径, ".png") == 1) { 返回 "image/png"; }
-    如果 (字符串::结束于(文件路径, ".jpg") == 1 或 字符串::结束于(文件路径, ".jpeg") == 1) { 返回 "image/jpeg"; }
-    如果 (字符串::结束于(文件路径, ".svg") == 1) { 返回 "image/svg+xml"; }
-    返回 "text/plain; charset=utf-8";
+// 按扩展名给 Cache-Control：
+//   .html/.htm     → no-cache（内容易变，且引用的是哈希资源）
+//   字体 / 图片     → 1 年 + immutable（稳定，通常内容哈希；顺带治本 iOS 字体 bug）
+//   其它(css/js/…)  → 1 小时（未哈希资源避免长期陈旧；哈希资源可自行加长）
+函数 缓存策略(文件路径: 字符串) : 字符串 {
+    如果 (字符串::结束于(文件路径, ".html") == 1 或 字符串::结束于(文件路径, ".htm") == 1) {
+        返回 "no-cache";
+    }
+    如果 (字符串::结束于(文件路径, ".woff2") == 1 或 字符串::结束于(文件路径, ".woff") == 1
+        或 字符串::结束于(文件路径, ".ttf") == 1 或 字符串::结束于(文件路径, ".otf") == 1
+        或 字符串::结束于(文件路径, ".eot") == 1
+        或 字符串::结束于(文件路径, ".png") == 1 或 字符串::结束于(文件路径, ".jpg") == 1
+        或 字符串::结束于(文件路径, ".jpeg") == 1 或 字符串::结束于(文件路径, ".gif") == 1
+        或 字符串::结束于(文件路径, ".webp") == 1 或 字符串::结束于(文件路径, ".svg") == 1
+        或 字符串::结束于(文件路径, ".ico") == 1) {
+        返回 "public, max-age=31536000, immutable";
+    }
+    返回 "public, max-age=3600";
 }
 
 函数 静态文件路径(目录: 字符串, 前缀: 字符串, 请求路径文本: 字符串) : 字符串 {
@@ -62,18 +71,20 @@
         返回 下一步(上下文值);
     }
 
-    // HEAD：不发 body，返回 Content-Type + 缓存头即可（Content-Length=0，同旧行为）。
+    // HEAD：不发 body，返回 Content-Type + 缓存头 + Accept-Ranges（Content-Length=0）。
     // 不走 sendfile（sendfile 的 Rust 路径总会读文件写 body，HEAD 不需要）。
     如果 (请求方法(上下文值) == "HEAD") {
         变量 头响应: 响应 = 文本("");
-        头响应.头部 = "Content-Type: " + 静态内容类型(文件路径);
-        返回 设置响应头(头响应, "Cache-Control", "public, max-age=60");
+        头响应.头部 = "Content-Type: " + 推断文件MIME(文件路径) + "\r\nAccept-Ranges: bytes";
+        返回 设置响应头(头响应, "Cache-Control", 缓存策略(文件路径));
     }
 
     // GET：走 sendfile —— 二进制安全（图片/字体等经 Rust std::fs::read 字节直发，
-    // 不再经 UTF-8 字符串管道被 NUL 截断或读空）。发送文件 已按扩展名设好 Content-Type。
-    变量 响应值: 响应 = 发送文件(文件路径);
-    响应值 = 设置响应头(响应值, "Cache-Control", "public, max-age=60");
+    // 不再经 UTF-8 字符串管道被 NUL 截断或读空）。发送文件带范围 已按扩展名设好
+    // Content-Type，并透传请求 Range 头 → Rust 层做 206 部分响应 + Accept-Ranges。
+    变量 range值: 字符串 = 请求头(上下文值, "Range");
+    变量 响应值: 响应 = 发送文件带范围(文件路径, range值);
+    响应值 = 设置响应头(响应值, "Cache-Control", 缓存策略(文件路径));
     返回 响应值;
 }
 

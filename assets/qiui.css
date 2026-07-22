@@ -1,0 +1,187 @@
+/*!
+ * qiui.css — styles for qi-web client widgets (qiui.js)
+ *
+ * De-branded: override the CSS custom properties below to theme. Fallback
+ * values are neutral. Include after your own reset/base styles:
+ *   <link rel="stylesheet" href="/static/qiui.css">
+ */
+
+:root {
+  --qiui-accent: #2563eb;       /* highlight / active color (arrow rotate, links) */
+  --qiui-text: #1e293b;         /* primary text + borders */
+  --qiui-border: #1e293b;       /* control border color */
+  --qiui-bg: #ffffff;           /* control background */
+  --qiui-hover: #f1f5f9;        /* option hover / selected background */
+  --qiui-divider: #e2e8f0;      /* option separator + table borders */
+  --qiui-muted: #64748b;        /* arrow / muted text */
+  --qiui-shadow: #1e293b;       /* hard drop-shadow color for the menu */
+  --qiui-code-bg: #f1f5f9;      /* inline code background */
+  --qiui-radius: 10px;          /* control corner radius */
+}
+
+/* ── Custom dropdown (.qdd) ─────────────────────────────────────────────
+   Replaces native <select>: the option panel opens glued to the box, so it
+   never detaches to the bottom of the screen on mobile / Chromium. */
+.qdd {
+  position: relative;
+  width: 100%;
+  margin: 6px 0;
+}
+.qdd-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  height: 44px;
+  background: var(--qiui-bg, #fff);
+  color: var(--qiui-text, #1e293b);
+  border: 2px solid var(--qiui-border, #1e293b);
+  border-radius: var(--qiui-radius, 10px);
+  padding: 0 12px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+.qdd-txt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.qdd-ar {
+  font-size: 12px;
+  color: var(--qiui-muted, #64748b);
+  flex: none;
+  transition: transform 0.15s;
+}
+.qdd.open .qdd-ar {
+  transform: rotate(180deg);
+  color: var(--qiui-accent, #2563eb);
+}
+.qdd-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--qiui-bg, #fff);
+  border: 2px solid var(--qiui-border, #1e293b);
+  border-radius: var(--qiui-radius, 10px);
+  box-shadow: 3px 3px 0 var(--qiui-shadow, #1e293b);
+  z-index: 60;
+  overflow-y: auto;
+  max-height: 260px;
+}
+.qdd.open .qdd-menu {
+  display: block;
+}
+.qdd-opt {
+  padding: 11px 12px;
+  font-size: 15px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--qiui-divider, #e2e8f0);
+  white-space: nowrap;
+}
+.qdd-opt:last-child {
+  border-bottom: none;
+}
+.qdd-opt:hover,
+.qdd-opt.sel {
+  background: var(--qiui-hover, #f1f5f9);
+}
+.qdd-opt.sel {
+  font-weight: 700;
+}
+
+/* On mobile, bump control font to 16px to stop iOS auto-zoom on focus. */
+@media (max-width: 640px) {
+  .qdd-head {
+    font-size: 16px;
+  }
+  .qdd-opt {
+    font-size: 16px;
+  }
+}
+
+/* ── Markdown output (.md) ──────────────────────────────────────────────
+   Minimal styling for HTML produced by qiui.markdown(). Wrap output in an
+   element with class="md". */
+.md {
+  display: block;
+  line-height: 1.7;
+}
+.md > *:first-child {
+  margin-top: 0;
+}
+.md > *:last-child {
+  margin-bottom: 0;
+}
+.md h1,
+.md h2,
+.md h3 {
+  font-size: 16px;
+  margin: 8px 0 4px;
+}
+.md p {
+  margin: 6px 0;
+}
+.md ul,
+.md ol {
+  margin: 6px 0;
+  padding-left: 22px;
+}
+.md li {
+  margin: 2px 0;
+}
+.md code {
+  background: var(--qiui-code-bg, #f1f5f9);
+  padding: 1px 5px;
+  border-radius: 5px;
+  font-size: 13px;
+  font-family: ui-monospace, Menlo, monospace;
+}
+.md table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 14px;
+}
+.md th,
+.md td {
+  border: 1.5px solid var(--qiui-divider, #e2e8f0);
+  padding: 5px 9px;
+  text-align: left;
+}
+.md th {
+  background: var(--qiui-hover, #f1f5f9);
+}
+.md a {
+  color: var(--qiui-accent, #2563eb);
+  font-weight: 700;
+}
+.md b {
+  color: var(--qiui-text, #1e293b);
+}
+.md .muted {
+  color: var(--qiui-muted, #64748b);
+  font-size: 14px;
+}
+
+/* Tool-call step hint: markdown lines like "[调用工具 名称 {…}]" render as a
+   friendly pill (JSON args hidden). */
+.qi-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--qiui-hover, #f1f5f9);
+  border: 1.5px solid var(--qiui-accent, #2563eb);
+  color: var(--qiui-accent, #2563eb);
+  border-radius: 10px;
+  padding: 4px 11px;
+  font-size: 13px;
+  font-weight: 700;
+  margin: 5px 0;
+}
+.qi-tool b {
+  color: var(--qiui-text, #1e293b);
+}

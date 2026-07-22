@@ -1,0 +1,46 @@
+// SEO / 元信息 示例：渲染 <head> SEO 标签 + JSON-LD 结构化数据 + robots + sitemap
+包 主程序;
+
+导入 标准库.输入输出 作为 IO;
+导入 Web::{
+    元信息, 创建元信息, 设站点名, 设主题色, 设关键词,
+    渲染元信息, 渲染结构化,
+    组织节点, 网站节点, FAQ问答, FAQ节点, 面包屑项, 面包屑节点,
+    生成robots, 生成站点地图
+};
+
+函数 入口() {
+    // 1) <head> SEO / 社交分享标签
+    变量 信息: 元信息 = 创建元信息(
+        "AIOne 编程课堂 — 用中文，写出第一行 AI 代码",
+        "148 节可在浏览器里运行的中文编程课，第一节课就能写出会思考的 AI 程序。",
+        "https://kids.qilang.org/",
+        "https://kids.qilang.org/og.png"
+    );
+    信息 = 设站点名(信息, "AIOne 编程课堂");
+    信息 = 设主题色(信息, "#f5a623");
+    信息 = 设关键词(信息, "中文编程,少儿编程,AI编程,奇语言");
+    IO.打印行("===== <head> =====");
+    IO.打印(渲染元信息(信息));
+
+    // 2) JSON-LD 结构化数据（GEO）
+    变量 问答们: 字符串 = FAQ问答("需要英语基础吗？", "不需要，代码全是中文关键字。")
+        + "," + FAQ问答("几岁能学？", "8 岁孩子到零基础成年人都能学。");
+    变量 面包屑们: 字符串 = 面包屑项(1, "首页", "https://kids.qilang.org/")
+        + "," + 面包屑项(2, "课程", "https://kids.qilang.org/courses");
+    变量 节点们: 字符串 =
+        组织节点("AIOne 编程课堂", "https://kids.qilang.org/", "https://kids.qilang.org/favicon.svg", "用中文教编程")
+        + "," + 网站节点("AIOne 编程课堂", "https://kids.qilang.org/")
+        + "," + FAQ节点(问答们)
+        + "," + 面包屑节点(面包屑们);
+    IO.打印行("===== JSON-LD =====");
+    IO.打印(渲染结构化(节点们));
+
+    // 3) robots.txt
+    IO.打印行("===== robots.txt =====");
+    IO.打印(生成robots("https://kids.qilang.org/sitemap.xml"));
+
+    // 4) sitemap.xml
+    IO.打印行("===== sitemap.xml =====");
+    IO.打印(生成站点地图("https://kids.qilang.org/\nhttps://kids.qilang.org/courses"));
+}
