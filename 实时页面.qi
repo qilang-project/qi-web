@@ -339,10 +339,41 @@
     s = s + "    try{window.dispatchEvent(new CustomEvent('qi:断线'));}catch(e){}\n";
     s = s + "    setTimeout(connect,delay);delay=Math.min(delay*2,8000);};\n";
     s = s + "}\n";
+    // ── 自定义确认模态框（替代浏览器原生 confirm）──
+    s = s + "(function(){var st=document.createElement('style');st.textContent="
+        + "'#qi-modal{position:fixed;inset:0;z-index:100000;display:none;align-items:center;justify-content:center;background:rgba(15,23,42,.45);backdrop-filter:blur(2px);padding:20px}'"
+        + "+'#qi-modal .qi-modal-card{background:#fff;border:2.5px solid #1e3a4c;border-radius:18px;box-shadow:0 18px 50px rgba(0,0,0,.25);max-width:380px;width:100%;padding:22px 24px;animation:qiPop .16s ease-out}'"
+        + "+'@keyframes qiPop{from{transform:scale(.92);opacity:0}to{transform:scale(1);opacity:1}}'"
+        + "+'#qi-modal .qi-modal-title{font-size:17px;font-weight:800;color:#1e3a4c;margin:0 0 8px}'"
+        + "+'#qi-modal .qi-modal-msg{font-size:15px;line-height:1.65;color:#334155;margin:0 0 20px;white-space:pre-wrap}'"
+        + "+'#qi-modal .qi-modal-btns{display:flex;justify-content:flex-end;gap:10px}'"
+        + "+'#qi-modal button{padding:9px 20px;border-radius:11px;font-size:14px;font-weight:700;cursor:pointer;border:2px solid transparent}'"
+        + "+'#qi-modal .qi-modal-cancel{background:#fff;border-color:#cbd5e1;color:#475569}'"
+        + "+'#qi-modal .qi-modal-cancel:hover{background:#f1f5f9}'"
+        + "+'#qi-modal .qi-modal-ok{background:#3fa65c;color:#fff}'"
+        + "+'#qi-modal .qi-modal-ok:hover{background:#348a4d}';document.head.appendChild(st);})();\n";
+    s = s + "function qiConfirm(msg,onOk){\n";
+    s = s + "  var ov=document.getElementById('qi-modal');\n";
+    s = s + "  if(!ov){ov=document.createElement('div');ov.id='qi-modal';\n";
+    s = s + "    ov.innerHTML='<div class=\"qi-modal-card\"><div class=\"qi-modal-title\">请确认</div><div class=\"qi-modal-msg\"></div><div class=\"qi-modal-btns\"><button type=\"button\" class=\"qi-modal-cancel\">取消</button><button type=\"button\" class=\"qi-modal-ok\">确定</button></div></div>';\n";
+    s = s + "    document.body.appendChild(ov);}\n";
+    s = s + "  ov.querySelector('.qi-modal-msg').textContent=msg;\n";
+    s = s + "  var ok=ov.querySelector('.qi-modal-ok'),cancel=ov.querySelector('.qi-modal-cancel');\n";
+    s = s + "  function close(){ov.style.display='none';document.removeEventListener('keydown',onKey);}\n";
+    s = s + "  function onKey(e){if(e.key==='Escape'){close();}else if(e.key==='Enter'){close();if(onOk)onOk();}}\n";
+    s = s + "  ok.onclick=function(){close();if(onOk)onOk();};\n";
+    s = s + "  cancel.onclick=close;\n";
+    s = s + "  ov.onclick=function(e){if(e.target===ov)close();};\n";
+    s = s + "  document.addEventListener('keydown',onKey);\n";
+    s = s + "  ov.style.display='flex';setTimeout(function(){ok.focus();},0);\n";
+    s = s + "}\n";
+    s = s + "window.qiConfirm=qiConfirm;\n";
     // ── 事件委托绑定 ──
     s = s + "document.addEventListener('click',function(e){\n";
     s = s + "  var el=e.target.closest?e.target.closest('[data-点击]'):null;\n";
-    s = s + "  if(el){var cf=el.getAttribute('data-确认');if(cf&&!confirm(cf)){return;}send(el.getAttribute('data-点击'),vals(el),el);}\n";
+    s = s + "  if(el){var cf=el.getAttribute('data-确认');\n";
+    s = s + "    if(cf){qiConfirm(cf,function(){send(el.getAttribute('data-点击'),vals(el),el);});return;}\n";
+    s = s + "    send(el.getAttribute('data-点击'),vals(el),el);}\n";
     s = s + "});\n";
     s = s + "document.addEventListener('input',function(e){\n";
     s = s + "  var el=e.target.closest?e.target.closest('[data-输入]'):null;\n";
@@ -362,12 +393,16 @@
     s = s + "  send(el.getAttribute('data-按键'),p,el);\n";
     s = s + "  if(el.hasAttribute('data-按键清空')){el.value='';}\n";
     s = s + "});\n";
+    s = s + "function qiDoSubmit(f4){var d=vals(f4);\n";
+    s = s + "  new FormData(f4).forEach(function(v,k){d[k]=v;});\n";
+    s = s + "  send(f4.getAttribute('data-提交'),d,f4);\n";
+    s = s + "  if(sub){f4.reset();}}\n";
     s = s + "document.addEventListener('submit',function(e){\n";
     s = s + "  var f4=e.target.closest?e.target.closest('[data-提交]'):null;\n";
-    s = s + "  if(f4){e.preventDefault();var d=vals(f4);\n";
-    s = s + "    new FormData(f4).forEach(function(v,k){d[k]=v;});\n";
-    s = s + "    send(f4.getAttribute('data-提交'),d,f4);\n";
-    s = s + "    if(sub){f4.reset();}}\n";
+    s = s + "  if(f4){e.preventDefault();\n";
+    s = s + "    var cf=f4.getAttribute('data-确认');\n";
+    s = s + "    if(cf){qiConfirm(cf,function(){qiDoSubmit(f4);});return;}\n";
+    s = s + "    qiDoSubmit(f4);}\n";
     s = s + "});\n";
     s = s + "connect();\n";
     s = s + "})();\n</script>";
