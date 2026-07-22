@@ -1,0 +1,87 @@
+// Qi Web - 聊天界面 —— 开箱即用的 AI 聊天前端（纯 UI，不依赖 Harness）
+//
+// 配合 事件流 的 SSE流式对话 用：服务端一条 `message` 事件流吐 token，
+// 客户端这段 JS 负责气泡、逐字追加、`[调用工具 …]` 标记转成「正在用工具」提示、
+// `[完成]` 收尾。任何 app 一行 聊天界面(...) 就有完整聊天页，不用再抄 EventSource JS。
+//
+// 用法（服务端）：
+//   函数 聊天页(上下文值: 上下文) : 响应 {
+//       返回 HTML(布局("助手", 聊天界面("AI 助手", "你好，问我点什么？", "/api/chat/stream")));
+//   }
+//   函数 聊天流(上下文值: 上下文) : 响应 {
+//       变量 代理值: 代理 = 建代理(...);              // app 自己装配（含工具）
+//       变量 问: 字符串 = 查询参数(上下文值, "q");
+//       返回 SSE流式对话(上下文值, "message", 闭包(推送: 函数(字符串): 整数): 整数 {
+//           流式运行(代理值, 问, 推送); 返回 1;         // Harness 的块回调直接透传
+//       });
+//   }
+//   获取(应用, "/chat", 聊天页); 获取(应用, "/api/chat/stream", 聊天流);
+包 Web;
+
+导入 标准库.字符串;
+
+// 完整聊天界面（聊天区 + 输入框 + 脚本 + 作用域 CSS）。流路径 = SSE 端点（收 ?q=）。
+公开 函数 聊天界面(标题: 字符串, 欢迎语: 字符串, 流路径: 字符串) : 字符串 {
+    变量 h: 字符串 = 聊天样式();
+    h = h + "<div class=\"qic\"><div class=\"qic-head\">" + 转义HTML(标题) + "</div>";
+    h = h + "<div class=\"qic-log\" id=\"qiclog\">";
+    如果 (字符串::字节长度(欢迎语) > 0) {
+        h = h + "<div class=\"qic-m ai\"><div class=\"qic-b\">" + 转义HTML(欢迎语) + "</div></div>";
+    }
+    h = h + "</div>";
+    h = h + "<div class=\"qic-in\"><input id=\"qicq\" placeholder=\"问点什么…\" autocomplete=\"off\">"
+        + "<button id=\"qicsend\">发送</button></div></div>";
+    h = h + 聊天脚本(流路径);
+    返回 h;
+}
+
+// 服务端渲染一条历史气泡（角色 = "me" / "ai"）。转义HTML 复用 实时页面 里的同名函数。
+公开 函数 聊天气泡(角色: 字符串, 文本: 字符串) : 字符串 {
+    返回 "<div class=\"qic-m " + 角色 + "\"><div class=\"qic-b\">" + 转义HTML(文本) + "</div></div>";
+}
+
+函数 聊天脚本(流路径: 字符串) : 字符串 {
+    // 单条 message 事件流：含 "[调用工具 X …]" 的片段渲成工具提示并另起气泡；
+    // "[完成]" 收尾；其余逐字追加到当前 AI 气泡。与 事件流.SSE流式对话 完全对接。
+    返回 "<script>(function(){"
+        + "var log=document.getElementById('qiclog'),q=document.getElementById('qicq'),send=document.getElementById('qicsend');"
+        + "function add(cls,txt){var m=document.createElement('div');m.className='qic-m '+cls;"
+        + "var b=document.createElement('div');b.className='qic-b';b.textContent=txt;m.appendChild(b);"
+        + "log.appendChild(m);log.scrollTop=log.scrollHeight;return b;}"
+        + "function tool(txt){var t=document.createElement('div');t.className='qic-tool';t.textContent=txt;"
+        + "log.appendChild(t);log.scrollTop=log.scrollHeight;}"
+        + "function toolMsg(d){var n=(d.match(/\\[调用工具\\s+([a-zA-Z0-9_\\-]+)/)||[])[1]||'';"
+        + "return '🔧 正在用工具 '+n+' …';}"
+        + "function ask(){var text=q.value.trim();if(!text)return;add('me',text);q.value='';"
+        + "q.disabled=true;send.disabled=true;var bub=add('ai','');var buf='';"
+        + "var es=new EventSource('" + 流路径 + "?q='+encodeURIComponent(text));"
+        + "es.addEventListener('message',function(e){var d=e.data;"
+        + "if(d==='[完成]'){es.close();q.disabled=false;send.disabled=false;q.focus();return;}"
+        + "if(d.indexOf('[调用工具')>=0){tool(toolMsg(d));bub=add('ai','');buf='';return;}"
+        + "buf+=d;bub.textContent=buf;log.scrollTop=log.scrollHeight;});"
+        + "es.addEventListener('error',function(){es.close();if(!buf&&bub)bub.textContent='（连接中断，稍后再试）';"
+        + "q.disabled=false;send.disabled=false;});}"
+        + "send.addEventListener('click',ask);q.addEventListener('keydown',function(e){if(e.key==='Enter')ask();});"
+        + "q.focus();})();</script>";
+}
+
+// 作用域 CSS（.qic 前缀，不与 app 样式冲突）；用 CSS 变量便于覆盖主题色
+公开 函数 聊天样式() : 字符串 {
+    返回 "<style>"
+        + ".qic{--qic-accent:#f97316;--qic-bg:#fff;--qic-line:#e2e8f0;--qic-ai:#f1f5f9;"
+        + "border:1px solid var(--qic-line);border-radius:14px;overflow:hidden;background:var(--qic-bg);"
+        + "display:flex;flex-direction:column;max-width:820px;margin:0 auto}"
+        + ".qic-head{padding:12px 18px;border-bottom:1px solid var(--qic-line);font-weight:600}"
+        + ".qic-log{height:56vh;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:12px}"
+        + ".qic-m{max-width:82%}.qic-m.me{align-self:flex-end}.qic-m.ai{align-self:flex-start}"
+        + ".qic-b{display:inline-block;padding:10px 14px;border-radius:14px;font-size:15px;line-height:1.6;white-space:pre-wrap;word-break:break-word}"
+        + ".qic-m.me .qic-b{background:var(--qic-accent);color:#fff;border-bottom-right-radius:4px}"
+        + ".qic-m.ai .qic-b{background:var(--qic-ai);color:#1e293b;border-bottom-left-radius:4px}"
+        + ".qic-tool{align-self:center;color:#94a3b8;font-size:13px;font-style:italic}"
+        + ".qic-in{display:flex;gap:10px;padding:14px;border-top:1px solid var(--qic-line)}"
+        + ".qic-in input{flex:1;padding:11px 14px;border:1px solid var(--qic-line);border-radius:10px;font-size:15px;font-family:inherit}"
+        + ".qic-in input:focus{outline:none;border-color:var(--qic-accent)}"
+        + ".qic-in button{background:var(--qic-accent);color:#fff;border:none;border-radius:10px;padding:0 22px;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit}"
+        + ".qic-in button:disabled{opacity:.5;cursor:default}"
+        + "</style>";
+}
