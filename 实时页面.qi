@@ -342,7 +342,7 @@
     // ── 事件委托绑定 ──
     s = s + "document.addEventListener('click',function(e){\n";
     s = s + "  var el=e.target.closest?e.target.closest('[data-点击]'):null;\n";
-    s = s + "  if(el){send(el.getAttribute('data-点击'),vals(el),el);}\n";
+    s = s + "  if(el){var cf=el.getAttribute('data-确认');if(cf&&!confirm(cf)){return;}send(el.getAttribute('data-点击'),vals(el),el);}\n";
     s = s + "});\n";
     s = s + "document.addEventListener('input',function(e){\n";
     s = s + "  var el=e.target.closest?e.target.closest('[data-输入]'):null;\n";

@@ -1,0 +1,173 @@
+// Qi Web - 富聊天 —— 流式富 UI 聊天（借鉴 aigui：渐进式 markdown + 卡片 + 图元块）
+//
+// AI 的流式输出不再是纯文本，而是边流边渲染成结构化 UI：
+//   · 渐进式 markdown：一边流一边渲染，半截语法（未闭合 ** / ` / ``` ）实时修复不闪烁
+//   · 图元块（complete-gated：闭合前显示骨架，闭合后整块渲染）：
+//       ```表格  {"表头":[...],"行":[[...]]}      ```列表 {"条目":[...]}
+//       ```键值  {"对":{"k":"v"}}
+//   · 应用自定义卡片：```卡片:<类型>  {标题,字段,动作:[{名,动作,参数}]}
+//       按钮是声明式的——点了由 app POST 到 动作端点，app 做真实操作（LLM 只填数据）
+//
+// 三块可复用（供全页聊天 或 嵌进已有聊天窗）：
+//   富块样式()      —— 表格/列表/键值/卡片/骨架 的 CSS
+//   富渲染脚本()    —— 定义全局 window.qiRich(元素, 缓冲, 动作端点)：把缓冲渲染进元素
+//   富聊天界面(...)  —— 开箱即用的整页聊天组件（内部用上面两块 + 一个 EventSource 控制器）
+//
+// 服务端把 AI生成指南(允许项) 拼进系统提示，模型就知道能吐哪些块。
+包 Web;
+
+导入 标准库.字符串;
+
+// ── 整页聊天组件 ───────────────────────────────────────
+公开 函数 富聊天界面(标题: 字符串, 欢迎语: 字符串, 流路径: 字符串, 动作端点: 字符串) : 字符串 {
+    变量 h: 字符串 = 富样式() + 富渲染脚本();
+    h = h + "<div class=\"rqc\"><div class=\"rqc-head\">" + 转义HTML(标题) + "</div>";
+    h = h + "<div class=\"rqc-log\" id=\"rqclog\">";
+    如果 (字符串::字节长度(欢迎语) > 0) {
+        h = h + "<div class=\"rqc-m ai\"><div class=\"rqc-b\">" + 转义HTML(欢迎语) + "</div></div>";
+    }
+    h = h + "</div><div class=\"rqc-in\"><input id=\"rqcq\" placeholder=\"问点什么…\" autocomplete=\"off\">"
+        + "<button id=\"rqcsend\">发送</button></div></div>";
+    h = h + 控制器脚本(流路径, 动作端点);
+    返回 h;
+}
+
+// ── 服务端：给模型的生成指南（追加到系统提示末尾）──────────
+// 允许项 = 逗号分隔，如 "表格,列表,键值,卡片:发分确认"。
+公开 函数 AI生成指南(允许项: 字符串) : 字符串 {
+    变量 g: 字符串 = "\n\n【输出格式】正常用 Markdown 回答。需要结构化展示时，"
+        + "只能用下面列出的围栏块（```），块体是 JSON，不要输出其它围栏类型：\n";
+    如果 (字符串::查找(允许项, "表格") >= 0) {
+        g = g + "- 表格：```表格 换行 {\"表头\":[\"列1\",\"列2\"],\"行\":[[\"a\",\"b\"]]} 换行 ```\n";
+    }
+    如果 (字符串::查找(允许项, "列表") >= 0) {
+        g = g + "- 列表：```列表 换行 {\"条目\":[\"第一条\",\"第二条\"]} 换行 ```\n";
+    }
+    如果 (字符串::查找(允许项, "键值") >= 0) {
+        g = g + "- 键值：```键值 换行 {\"对\":{\"型号\":\"KX-500\",\"价格\":\"3299元\"}} 换行 ```\n";
+    }
+    如果 (字符串::查找(允许项, "卡片") >= 0) {
+        g = g + "- 卡片：```卡片:<类型> 换行 {\"标题\":\"...\",\"字段\":{\"k\":\"v\"},"
+            + "\"动作\":[{\"名\":\"确认\",\"动作\":\"名字\",\"参数\":{...}}]} 换行 ```\n"
+            + "  卡片按钮是声明式的：你只描述动作和参数，真正的操作由系统在用户点击后执行，"
+            + "你绝不能声称自己已经完成。可用卡片类型：" + 允许项 + "\n";
+    }
+    g = g + "把「换行」理解为真正的换行。围栏块前后各留一空行。\n";
+    返回 g;
+}
+
+// ── 可复用渲染器：定义 window.qiRich(元素, 缓冲, 动作端点) ──
+公开 函数 富渲染脚本() : 字符串 {
+    返回 "<script>(function(){if(window.qiRich)return;"
+        + "function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;');}"
+        // repair（移植 aigui repair-markdown）
+        + "function repair(b){var o=b;var f=(o.match(/^```/gm)||[]).length;"
+        + "if(f%2===1){if(!o.endsWith('\\n'))o+='\\n';return o+'```';}"
+        + "if(((o.match(/`/g)||[]).length)%2===1)o+='`';"
+        + "if(((o.match(/\\*\\*/g)||[]).length)%2===1)o+='**';"
+        + "if(((o.match(/~~/g)||[]).length)%2===1)o+='~~';return o;}"
+        // 行内 markdown
+        + "function inl(t){t=esc(t);t=t.replace(/`([^`]+)`/g,'<code>$1</code>');"
+        + "t=t.replace(/\\*\\*([^*]+)\\*\\*/g,'<b>$1</b>');t=t.replace(/\\*([^*]+)\\*/g,'<i>$1</i>');"
+        + "t=t.replace(/~~([^~]+)~~/g,'<s>$1</s>');"
+        + "t=t.replace(/\\[([^\\]]+)\\]\\((https?:[^)\\s]+)\\)/g,'<a href=\"$2\" target=\"_blank\" rel=\"noopener\">$1</a>');return t;}"
+        // 行级 markdown
+        + "function md(src){var out='',lines=src.split('\\n'),i=0,inul=false,inol=false;"
+        + "function cl(){if(inul){out+='</ul>';inul=false;}if(inol){out+='</ol>';inol=false;}}"
+        + "for(i=0;i<lines.length;i++){var ln=lines[i];var hm=ln.match(/^(#{1,4})\\s+(.*)$/);"
+        + "if(hm){cl();out+='<h'+hm[1].length+'>'+inl(hm[2])+'</h'+hm[1].length+'>';continue;}"
+        + "var um=ln.match(/^\\s*[-*]\\s+(.*)$/);if(um){if(!inul){cl();out+='<ul>';inul=true;}out+='<li>'+inl(um[1])+'</li>';continue;}"
+        + "var om=ln.match(/^\\s*\\d+\\.\\s+(.*)$/);if(om){if(!inol){cl();out+='<ol>';inol=true;}out+='<li>'+inl(om[1])+'</li>';continue;}"
+        + "var qm=ln.match(/^>\\s?(.*)$/);if(qm){cl();out+='<blockquote>'+inl(qm[1])+'</blockquote>';continue;}"
+        + "cl();if(ln.trim()!=='')out+='<p>'+inl(ln)+'</p>';}cl();return out;}"
+        // 分段
+        + "function segs(b){var res=[],re=/```([^\\n`]*)\\n([\\s\\S]*?)(```|$)/g,last=0,m;"
+        + "while((m=re.exec(b))){if(m.index>last)res.push({t:'md',v:b.slice(last,m.index)});"
+        + "res.push({t:'block',lang:(m[1]||'').trim(),body:m[2],closed:m[3]==='```'});last=re.lastIndex;}"
+        + "if(last<b.length)res.push({t:'md',v:b.slice(last)});return res;}"
+        + "function pj(s){try{return JSON.parse(s);}catch(e){return null;}}"
+        + "function skel(t){return '<div class=\"rqc-skel\">'+esc(t)+' …</div>';}"
+        + "function tbl(d){if(!d||!d.行)return skel('表格');var h='<table class=\"rqc-tbl\">';"
+        + "if(d.表头){h+='<tr>';d.表头.forEach(function(x){h+='<th>'+esc(x)+'</th>';});h+='</tr>';}"
+        + "(d.行||[]).forEach(function(r){h+='<tr>';(r||[]).forEach(function(c){h+='<td>'+esc(c)+'</td>';});h+='</tr>';});return h+'</table>';}"
+        + "function lst(d){if(!d||!d.条目)return skel('列表');var h='<ul class=\"rqc-list\">';"
+        + "d.条目.forEach(function(x){h+='<li>'+inl(String(x))+'</li>';});return h+'</ul>';}"
+        + "function kv(d){if(!d||!d.对)return skel('键值');var h='<div class=\"rqc-kv\">';"
+        + "Object.keys(d.对).forEach(function(k){h+='<div class=\"rqc-kvr\"><span class=\"rqc-kvk\">'+esc(k)+'</span><span>'+esc(d.对[k])+'</span></div>';});return h+'</div>';}"
+        + "function card(type,d){if(!d)return skel('卡片');var h='<div class=\"rqc-card\">';"
+        + "if(d.标题)h+='<div class=\"rqc-ct\">'+esc(d.标题)+'</div>';"
+        + "if(d.字段){h+='<div class=\"rqc-kv\">';Object.keys(d.字段).forEach(function(k){h+='<div class=\"rqc-kvr\"><span class=\"rqc-kvk\">'+esc(k)+'</span><span>'+esc(d.字段[k])+'</span></div>';});h+='</div>';}"
+        + "if(d.动作){h+='<div class=\"rqc-acts\">';d.动作.forEach(function(a){"
+        + "h+='<button class=\"rqc-abtn\" data-type=\"'+esc(type)+'\" data-act=\"'+esc(a.动作)+'\" data-params=\"'+esc(JSON.stringify(a.参数||{}))+'\">'+esc(a.名)+'</button>';});h+='</div>';}"
+        + "return h+'</div>';}"
+        + "function renderBlock(lang,body,closed){if(lang.indexOf('卡片')===0){return closed?card(lang.split(':')[1]||'',pj(body)):skel('卡片');}"
+        + "if(lang==='表格')return closed?tbl(pj(body)):skel('表格');"
+        + "if(lang==='列表')return closed?lst(pj(body)):skel('列表');"
+        + "if(lang==='键值')return closed?kv(pj(body)):skel('键值');"
+        + "return '<pre class=\"rqc-pre\"><code>'+esc(body)+'</code></pre>';}"
+        + "function bindActs(root,act){if(!act)return;root.querySelectorAll('.rqc-abtn').forEach(function(btn){"
+        + "if(btn.__b)return;btn.__b=1;btn.addEventListener('click',function(){btn.disabled=true;var old=btn.textContent;btn.textContent='处理中…';"
+        + "fetch(act,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({类型:btn.getAttribute('data-type'),动作:btn.getAttribute('data-act'),参数:JSON.parse(btn.getAttribute('data-params')||'{}')})})"
+        + ".then(function(r){return r.text();}).then(function(txt){var res=document.createElement('div');res.className='rqc-actres';res.textContent=txt;btn.parentNode.appendChild(res);btn.textContent='✓ 已处理';})"
+        + ".catch(function(){btn.disabled=false;btn.textContent=old;});});});}"
+        // 容错：模型常忘写 ``` 围栏，只吐「卡片:xx / 表格 / 列表 / 键值」+ 一行 JSON。
+        // 这里把这种裸块规范成围栏块，渲染器照样能认出来。
+        + "function normF(t){return t.replace(/(^|\\n)(卡片:[^\\n`]+|表格|列表|键值)[ \\t]*\\n(\\{[^\\n]*\\})/g,'$1```$2\\n$3\\n```');}"
+        + "window.qiRich=function(el,buf,act){var s=segs(repair(normF(buf))),html='';"
+        + "s.forEach(function(seg){if(seg.t==='md')html+=md(seg.v);else html+=renderBlock(seg.lang,seg.body,seg.closed);});"
+        + "el.innerHTML=html;bindActs(el,act||'');};"
+        + "})();</script>";
+}
+
+// ── 整页聊天的 EventSource 控制器（用 window.qiRich）──────
+函数 控制器脚本(流路径: 字符串, 动作端点: 字符串) : 字符串 {
+    返回 "<script>(function(){var log=document.getElementById('rqclog'),q=document.getElementById('rqcq'),send=document.getElementById('rqcsend');"
+        + "var ACT='" + 动作端点 + "';"
+        + "function add(cls){var m=document.createElement('div');m.className='rqc-m '+cls;var b=document.createElement('div');b.className='rqc-b';m.appendChild(b);log.appendChild(m);log.scrollTop=log.scrollHeight;return b;}"
+        + "function tool(txt){var t=document.createElement('div');t.className='rqc-tool';t.textContent=txt;log.appendChild(t);}"
+        + "function toolMsg(d){var n=(d.match(/\\[调用工具\\s+([a-zA-Z0-9_\\-]+)/)||[])[1]||'';return '🔧 正在用工具 '+n+' …';}"
+        + "function ask(){var text=q.value.trim();if(!text)return;var u=add('me');u.textContent=text;q.value='';"
+        + "q.disabled=true;send.disabled=true;var bub=add('ai');var buf='';bub.innerHTML='<span class=\"rqc-cur\"></span>';"
+        + "var es=new EventSource('" + 流路径 + "?q='+encodeURIComponent(text));"
+        + "es.addEventListener('message',function(e){var d=e.data;"
+        + "if(d==='[完成]'){es.close();q.disabled=false;send.disabled=false;q.focus();window.qiRich(bub,buf,ACT);return;}"
+        + "if(d.indexOf('[调用工具')>=0){tool(toolMsg(d));bub=add('ai');buf='';return;}"
+        + "buf+=d;window.qiRich(bub,buf,ACT);log.scrollTop=log.scrollHeight;});"
+        + "es.addEventListener('error',function(){es.close();if(!buf&&bub)bub.textContent='（连接中断，稍后再试）';q.disabled=false;send.disabled=false;});}"
+        + "send.addEventListener('click',ask);q.addEventListener('keydown',function(e){if(e.key==='Enter')ask();});q.focus();})();</script>";
+}
+
+// ── 样式 ───────────────────────────────────────────────
+// 图元块 / 卡片 / 骨架 的 CSS —— 可复用（嵌进已有聊天窗时单独引这个）
+公开 函数 富块样式() : 字符串 {
+    返回 "<style>"
+        + ".rqc-tbl{border-collapse:collapse;width:100%;margin:.4em 0;font-size:14px}.rqc-tbl th,.rqc-tbl td{border:1px solid #e2e8f0;padding:6px 10px;text-align:left}.rqc-tbl th{background:#f8fafc}"
+        + ".rqc-kv{margin:.3em 0}.rqc-kvr{display:flex;justify-content:space-between;gap:14px;padding:5px 0;border-bottom:1px dashed #e2e8f0}.rqc-kvk{color:#64748b}"
+        + ".rqc-list{margin:.3em 0;padding-left:1.3em}"
+        + ".rqc-card{border:2px solid #ff6b4a;border-radius:12px;padding:14px;margin:.5em 0;background:#fff7ed}.rqc-ct{font-weight:700;margin-bottom:8px}"
+        + ".rqc-acts{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap}.rqc-abtn{background:#ff6b4a;color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:14px;cursor:pointer;font-family:inherit}.rqc-abtn:disabled{opacity:.6}"
+        + ".rqc-actres{margin-top:8px;font-size:14px;color:#16a34a;font-weight:700}"
+        + ".rqc-skel{color:#94a3b8;font-size:13px;font-style:italic;padding:8px 0}"
+        + ".rqc-pre{background:#0f172a;color:#e2e8f0;padding:12px;border-radius:8px;overflow:auto;font-size:13px}"
+        + "</style>";
+}
+
+// 整页聊天的外壳样式（含 富块样式）
+公开 函数 富样式() : 字符串 {
+    返回 富块样式() + "<style>"
+        + ".rqc{--a:#f97316;--line:#e2e8f0;--ai:#f8fafc;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#fff;display:flex;flex-direction:column;max-width:860px;margin:0 auto}"
+        + ".rqc-head{padding:12px 18px;border-bottom:1px solid var(--line);font-weight:600}"
+        + ".rqc-log{height:58vh;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:12px}"
+        + ".rqc-m{max-width:88%}.rqc-m.me{align-self:flex-end}.rqc-m.ai{align-self:flex-start;max-width:96%}"
+        + ".rqc-b{display:inline-block;padding:10px 14px;border-radius:14px;font-size:15px;line-height:1.65;word-break:break-word}"
+        + ".rqc-m.me .rqc-b{background:var(--a);color:#fff;border-bottom-right-radius:4px;white-space:pre-wrap}"
+        + ".rqc-m.ai .rqc-b{background:var(--ai);border:1px solid var(--line);border-bottom-left-radius:4px}"
+        + ".rqc-b p{margin:.3em 0}.rqc-b h1,.rqc-b h2,.rqc-b h3,.rqc-b h4{margin:.5em 0 .3em;line-height:1.3}"
+        + ".rqc-b ul,.rqc-b ol{margin:.3em 0;padding-left:1.4em}.rqc-b code{background:#eef2f7;padding:1px 5px;border-radius:5px;font-size:.9em}"
+        + ".rqc-b blockquote{margin:.4em 0;padding-left:10px;border-left:3px solid var(--line);color:#64748b}.rqc-b a{color:var(--a)}"
+        + ".rqc-tool{align-self:center;color:#94a3b8;font-size:13px;font-style:italic}"
+        + ".rqc-cur{display:inline-block;width:8px;height:15px;background:var(--a);animation:rqcb 1s step-end infinite}@keyframes rqcb{50%{opacity:0}}"
+        + ".rqc-in{display:flex;gap:10px;padding:14px;border-top:1px solid var(--line)}.rqc-in input{flex:1;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font-size:15px;font-family:inherit}.rqc-in input:focus{outline:none;border-color:var(--a)}"
+        + ".rqc-in button{background:var(--a);color:#fff;border:none;border-radius:10px;padding:0 22px;font-weight:600;cursor:pointer;font-family:inherit}"
+        + "</style>";
+}
