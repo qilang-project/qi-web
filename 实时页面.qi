@@ -81,6 +81,15 @@
     返回 应用值;
 }
 
+// HTML Block 版本：渲染函数返回 HTML块，框架负责转成片段并复用同一套
+// WebSocket 事件循环与 DOM morph 运行时。
+公开 函数 实时块路由(应用值: 应用, 路径: 字符串, 初始状态函数: 函数(): 整数, 块渲染函数: 函数(整数): HTML块, 事件处理函数: 函数(整数, 字符串, 字符串): 整数) : 应用 {
+    变量 渲染函数: 函数(整数): 字符串 = 闭包(状态: 整数): 字符串 {
+        返回 渲染块(块渲染函数(状态));
+    };
+    返回 实时路由(应用值, 路径, 初始状态函数, 渲染函数, 事件处理函数);
+}
+
 // 页面路径 → WS 路径："/" → "/ws"，"/counter" → "/counter/ws"
 函数 实时WS路径(路径: 字符串) : 字符串 {
     如果 (字符串::等于(路径, "/") == 1) {
@@ -190,6 +199,16 @@
     返回 文本;
 }
 
+// 统一轻提示，类型建议 success / error / info。
+公开 函数 指令_提示(消息: 字符串, 类型值: 字符串) : 字符串 {
+    变量 载荷: 整数 = J.创建对象();
+    J.设置字符串(载荷, "消息", 消息);
+    J.设置字符串(载荷, "类型", 类型值);
+    变量 载荷文本: 字符串 = J.转字符串(载荷);
+    J.删除(载荷);
+    返回 指令_事件("资源提示", 载荷文本);
+}
+
 // {"类型":类型值, 键:值} —— 经 J 序列化保证转义
 函数 指令两字段(类型值: 字符串, 键: 字符串, 值: 字符串) : 字符串 {
     变量 对象: 整数 = J.创建对象();
@@ -259,7 +278,8 @@
     s = s + "var hb=" + 整数转字符串(心跳毫秒) + ";\n";
     s = s + "var ws=null,hbTimer=null,delay=500,pending=[];\n";
     // ── 上行 ──
-    s = s + "function ident(p){p=p||{};if(sub){if(sub['昵称']!==undefined)p['昵称']=sub['昵称'];";
+    s = s + "function ident(p){p=p||{};if(sub){if(sub['token']!==undefined)p['token']=sub['token'];";
+    s = s + "if(sub['昵称']!==undefined)p['昵称']=sub['昵称'];";
     s = s + "if(sub['成员id']!==undefined)p['成员id']=sub['成员id'];}return p;}\n";
     s = s + "function vals(el){var p={},i,a;if(!el||!el.attributes)return p;\n";
     s = s + "  for(i=0;i<el.attributes.length;i++){a=el.attributes[i];\n";
@@ -314,13 +334,15 @@
     s = s + "  else if(t==='滚动'){var el=document.querySelector(c['目标']);\n";
     s = s + "    if(el){try{el.scrollIntoView({behavior:'smooth',block:'end'});}catch(e){el.scrollIntoView();}}}\n";
     s = s + "  else if(t==='事件'){var d=null;try{d=JSON.parse(c['载荷文本']||'null');}catch(e){}\n";
-    s = s + "    try{window.dispatchEvent(new CustomEvent('qi:'+c['名称'],{detail:d}));}catch(e2){}}\n";
+    s = s + "    try{window.dispatchEvent(new CustomEvent('qi:'+c['名称'],{detail:d}));}catch(e2){}\n";
+    s = s + "    if(c['名称']==='资源提示'&&d){var n=document.createElement('div'),ok=d['类型']==='success';\n";
+    s = s + "      n.textContent=d['消息']||'';n.style.cssText='position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:100001;padding:11px 18px;border:2px solid #1e3a4c;border-radius:12px;background:'+(ok?'#eaf7ee':'#fff0eb')+';color:#1e3a4c;font-weight:700;box-shadow:4px 4px 0 #1e3a4c';document.body.appendChild(n);setTimeout(function(){n.remove();},2400);}}\n";
     s = s + "}\n";
     s = s + "function apply(m){\n";
     s = s + "  if(m.html!==undefined){var live=document.getElementById('qi-live');\n";
     s = s + "    if(live){var box=document.createElement('div');box.innerHTML=m.html;morphKids(live,box);}\n";
     s = s + "    clearLoad();}\n";
-    s = s + "  if(m['指令']!==undefined&&m['指令'].forEach){m['指令'].forEach(runCmd);}\n";
+    s = s + "  if(m['指令']!==undefined&&m['指令'].forEach){m['指令'].forEach(runCmd);clearLoad();}\n";
     s = s + "}\n";
     // ── 连接与重连（指数退避）──
     s = s + "function connect(){\n";

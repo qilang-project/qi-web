@@ -6,9 +6,9 @@
 导入 Web.会话::{会话标识};
 
 公开 函数 Bearer令牌(上下文值: 上下文) : 字符串 {
-    变量 auth_text: 字符串 = 请求头(上下文值, "Authorization");
+    变量 auth_text: 字符串 = 字符串::去空白(请求头(上下文值, "Authorization"));
     如果 (字符串::开始于(auth_text, "Bearer ") == 1) {
-        返回 字符串::子串从位置(auth_text, 7);
+        返回 字符串::去空白(字符串::子串从位置(auth_text, 7));
     }
     返回 "";
 }
