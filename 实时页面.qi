@@ -32,6 +32,10 @@
 //   data-key="k"              morph 列表对齐键（对标 LiveView keyed comprehension）
 //   data-ignore               morph 跳过该元素子树（对标 phx-update="ignore"）
 //
+// 声明式绑定盖不到的自定义交互（拖拽/画布/快捷键），用运行时暴露的：
+//   window.qiSend("事件名", {键: 值})     —— 身份字段自动并入，和声明式绑定一致
+//   window.qiConfirm("提示语", 回调)      —— 与 data-confirm 同一个确认框
+//
 // 事件名本身是业务字符串，中文没问题（data-click="投票"）。
 // 中文属性名 data-点击 / data-值-* / data-键 / data-静止 / data-提交 / data-输入 /
 // data-按键 / data-确认 / data-防抖 等仍然识别，仅为兼容存量代码，新代码别用。
@@ -142,11 +146,21 @@
     };
     应用值 = 获取(应用值, 路径, 页面处理器);
 
+    返回 实时WS路由带准入(应用值, ws路径, 准入函数, 初始状态函数, 渲染函数, 事件处理函数);
+}
+
+// 只注册 WS 端点，页面自己写 —— 要自定义样式/脚本（拖拽、画布…）时用这个。
+// 页面里放 <div id="qi-live">…</div>，脚本用 实时运行时构建(ws路径, 订阅载荷JSON, 心跳)。
+// 与 共享WS路由带频道 的分工一致：框架管连接与事件，页面外壳归应用。
+公开 函数 实时WS路由带准入(应用值: 应用, ws路径: 字符串,
+                          准入函数: 函数(字符串): 字符串,
+                          初始状态函数: 函数(字符串): 整数,
+                          渲染函数: 函数(整数): 字符串,
+                          事件处理函数: 函数(整数, 字符串, 字符串): 整数) : 应用 {
     变量 ws处理器: 函数(整数): 整数 = 闭包(ws句柄: 整数): 整数 {
         返回 实时准入连接循环(ws句柄, 准入函数, 初始状态函数, 渲染函数, 事件处理函数);
     };
-    应用值 = WS路由(应用值, ws路径, ws处理器);
-    返回 应用值;
+    返回 WS路由(应用值, ws路径, ws处理器);
 }
 
 // HTML Block 版本：渲染函数返回 HTML块，框架负责转成片段并复用同一套
@@ -508,6 +522,11 @@
     s = s + "  ov.style.display='flex';setTimeout(function(){ok.focus();},0);\n";
     s = s + "}\n";
     s = s + "window.qiConfirm=qiConfirm;\n";
+    // 应用侧主动上行：声明式绑定只覆盖 click/input/keyup/submit，
+    // 拖拽、画布、快捷键这类自定义交互需要自己发事件。
+    //   window.qiSend("移动", {卡片id: 3, 目标栏: "doing"})
+    // 身份字段（token/昵称/成员id）会像声明式绑定一样自动并进载荷。
+    s = s + "window.qiSend=function(ev,payload){send(ev,payload||{},null);};\n";
     // ── 事件委托绑定 ──
     s = s + "document.addEventListener('click',function(e){\n";
     s = s + "  var el=closestFrom(e.target,'data-点击','data-click');\n";

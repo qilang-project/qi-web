@@ -13,9 +13,9 @@
 //   // 把 头 拼进你的 <head> ... </head>
 //
 //   // 结构化数据（GEO）：
-//   变量 节点们: 字符串 = 组织节点("站点名","https://站点/","https://站点/logo.svg","描述")
+//   变量 节点表: 字符串 = 组织节点("站点名","https://站点/","https://站点/logo.svg","描述")
 //       + "," + 网站节点("站点名","https://站点/");
-//   变量 脚本: 字符串 = 渲染结构化(节点们);   // <script type="application/ld+json">...
+//   变量 脚本: 字符串 = 渲染结构化(节点表);   // <script type="application/ld+json">...
 //
 //   // robots.txt / sitemap.xml 处理器：
 //   获取(应用值, "/robots.txt", robots处理器);   // 内部 返回 文本(生成robots("https://站点/sitemap.xml"))
@@ -198,8 +198,8 @@
     j = j + ",\"acceptedAnswer\":{\"@type\":\"Answer\",\"text\":\"" + 转义JSON(答) + "\"}}";
     返回 j;
 }
-公开 函数 FAQ节点(问答们: 字符串) : 字符串 {
-    返回 "{\"@type\":\"FAQPage\",\"mainEntity\":[" + 问答们 + "]}";
+公开 函数 FAQ节点(问答表: 字符串) : 字符串 {
+    返回 "{\"@type\":\"FAQPage\",\"mainEntity\":[" + 问答表 + "]}";
 }
 
 // 面包屑：面包屑项 造一项；多项用 "," 拼；面包屑节点 包成 BreadcrumbList
@@ -208,19 +208,19 @@
     j = j + ",\"name\":\"" + 转义JSON(名) + "\",\"item\":\"" + 转义JSON(链接) + "\"}";
     返回 j;
 }
-公开 函数 面包屑节点(项们: 字符串) : 字符串 {
-    返回 "{\"@type\":\"BreadcrumbList\",\"itemListElement\":[" + 项们 + "]}";
+公开 函数 面包屑节点(项表: 字符串) : 字符串 {
+    返回 "{\"@type\":\"BreadcrumbList\",\"itemListElement\":[" + 项表 + "]}";
 }
 
-// 把逗号拼好的节点们包进 @graph；仅返回 JSON 文本
-公开 函数 JSONLD文档(节点们: 字符串) : 字符串 {
-    返回 "{\"@context\":\"https://schema.org\",\"@graph\":[" + 节点们 + "]}";
+// 把逗号拼好的节点表包进 @graph；仅返回 JSON 文本
+公开 函数 JSONLD文档(节点表: 字符串) : 字符串 {
+    返回 "{\"@context\":\"https://schema.org\",\"@graph\":[" + 节点表 + "]}";
 }
 
 // 包成可直接塞进 <head> 的 <script type="application/ld+json"> 块
-公开 函数 渲染结构化(节点们: 字符串) : 字符串 {
+公开 函数 渲染结构化(节点表: 字符串) : 字符串 {
     返回 "    <script type=\"application/ld+json\">"
-        + JSONLD文档(节点们)
+        + JSONLD文档(节点表)
         + "</script>\n";
 }
 
