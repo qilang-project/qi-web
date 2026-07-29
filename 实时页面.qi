@@ -233,6 +233,7 @@
 // 退出时释放该连接的状态句柄。
 函数 实时事件循环(ws句柄: 整数, 状态入参: 整数, 渲染函数: 函数(整数): 字符串, 事件处理函数: 函数(整数, 字符串, 字符串): 整数) : 整数 {
     变量 状态: 整数 = 状态入参;
+    变量 上一帧: 字符串 = 渲染函数(状态入参);   // 首帧已在进循环前发过，这里只记住它
     变量 继续循环: 整数 = 1;
     当 (继续循环 == 1 与 WS::已连接(ws句柄) == 1) {
         变量 消息: 字符串 = WS::接收文本(ws句柄);
@@ -257,7 +258,9 @@
                     }
                     // 事件处理可能返回新句柄（换状态），也可能原样返回
                     状态 = 事件处理函数(状态, 事件名, 载荷串);
-                    实时发送整区(ws句柄, 渲染函数(状态));
+                    变量 新帧: 字符串 = 渲染函数(状态);
+                    实时发送增量(ws句柄, 上一帧, 新帧);
+                    上一帧 = 新帧;
                     发送待发指令(ws句柄, 状态);
                 }
                 J.删除(消息对象);
@@ -275,6 +278,37 @@
 函数 实时发送整区(ws句柄: 整数, 片段: 字符串) : 整数 {
     变量 帧对象: 整数 = J.创建对象();
     J.设置字符串(帧对象, "html", 片段);
+    变量 帧文本: 字符串 = J.转字符串(帧对象);
+    J.删除(帧对象);
+    返回 WS::发送文本(ws句柄, 帧文本);
+}
+
+// 增量下发：服务端每次事件都重渲染整段 HTML，全量发很浪费 —— 家有小奇点一下
+// 要过 13.5KB，哪怕只是一个数字从 5 变 6。这里发「公共前缀长度 + 公共后缀长度
+// + 中间替换段」，客户端拼回完整 HTML 再走同一套 morph（morph 语义完全不变）。
+//
+// 前缀/后缀在 runtime 里算（qi 侧逐字符比对是 O(n²)），返回的字节数已对齐
+// UTF-8 字符边界，不会把中文切成半个字。
+// 中段反而更大时（大改动）就老老实实发全量。
+函数 实时发送增量(ws句柄: 整数, 旧片段: 字符串, 新片段: 字符串) : 整数 {
+    如果 (字符串::字节长度(旧片段) == 0) {
+        返回 实时发送整区(ws句柄, 新片段);
+    }
+    变量 前缀: 整数 = 字符串::公共前缀(旧片段, 新片段);
+    变量 后缀: 整数 = 字符串::公共后缀(旧片段, 新片段, 前缀);
+    变量 新长: 整数 = 字符串::字节长度(新片段);
+    变量 中段长: 整数 = 新长 - 前缀 - 后缀;
+    如果 (中段长 < 0) { 返回 实时发送整区(ws句柄, 新片段); }
+    // 省不下多少就别绕这一道（留点余量给 patch 帧自身的开销）
+    如果 (中段长 + 64 >= 新长) { 返回 实时发送整区(ws句柄, 新片段); }
+
+    变量 中段: 字符串 = 字符串::子串(新片段, 前缀, 中段长);
+    变量 帧对象: 整数 = J.创建对象();
+    变量 补丁: 整数 = J.创建对象();
+    J.设置整数(补丁, "p", 前缀);
+    J.设置整数(补丁, "s", 后缀);
+    J.设置字符串(补丁, "r", 中段);
+    J.设置对象(帧对象, "patch", 补丁);
     变量 帧文本: 字符串 = J.转字符串(帧对象);
     J.删除(帧对象);
     返回 WS::发送文本(ws句柄, 帧文本);
@@ -491,8 +525,15 @@
     s = s + "    if(c['name']==='resourceToast'&&d){var n=document.createElement('div'),ok=d['type']==='success';\n";
     s = s + "      n.textContent=d['消息']||'';n.style.cssText='position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:100001;padding:11px 18px;border:2px solid #1e3a4c;border-radius:12px;background:'+(ok?'#eaf7ee':'#fff0eb')+';color:#1e3a4c;font-weight:700;box-shadow:4px 4px 0 #1e3a4c';document.body.appendChild(n);setTimeout(function(){n.remove();},2400);}}\n";
     s = s + "}\n";
+    s = s + "var lastHtml='';\n";
     s = s + "function apply(m){\n";
+    // 增量帧：用上一帧 + 前缀/后缀/中段 拼回完整 HTML，再走同一套 morph
+    s = s + "  if(m.patch!==undefined&&lastHtml){var pt=m.patch;\n";
+    s = s + "    var b=new TextEncoder().encode(lastHtml);\n";
+    s = s + "    var dec=new TextDecoder();\n";
+    s = s + "    m={html:dec.decode(b.slice(0,pt.p))+pt.r+dec.decode(b.slice(b.length-pt.s))};}\n";
     s = s + "  if(m.html!==undefined){var live=document.getElementById('qi-live');\n";
+    s = s + "    lastHtml=m.html;\n";
     s = s + "    buildKeyIndex();\n";
     s = s + "    if(live){var box=document.createElement('div');box.innerHTML=m.html;morphKids(live,box);}\n";
     s = s + "    clearLoad();}\n";
