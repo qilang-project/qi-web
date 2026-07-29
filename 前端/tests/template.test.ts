@@ -177,7 +177,181 @@ describe('服务端 / 客户端渲染一致', () => {
     expect(all).toContain('__QI_HTML_H__');   // 受控原文
     expect(all).toContain('__QI_HTML_B1__');  // 布尔真
     expect(all).toContain('__QI_HTML_B0__');  // 布尔假
+    expect(all).toContain('__QI_HTML_C__');   // 嵌套子模板信封
+    expect(all).toContain('__QI_HTML_L__');   // 循环信封
     expect(all).toContain('"q"');             // 条件节点
     expect(all).toContain('"n":"br"');        // 空元素
+  });
+});
+
+/**
+ * 嵌套：子模板与循环。
+ *
+ * 这是 #2 LiveComponent / #3 Streams 的地基 —— 子块和列表项各自带着计划和槽位
+ * 进到父模板的槽位里，所以「20 项列表改第 7 项」只发那一项的那个槽位。
+ * 以前子块进父模板就被拍成一坨 HTML，改一个字要整坨重发。
+ */
+const C = (plan: PlanNode, slots: string[]) =>
+  '__QI_HTML_C__' + JSON.stringify({ p: plan, s: slots, h: '' });
+const L = (plan: PlanNode, items: string[][]) =>
+  '__QI_HTML_L__' + JSON.stringify({ p: plan, s: items, h: '' });
+
+// HTML { <span><b>{名}</b>{分}</span> }
+const BADGE: PlanNode = {
+  k: 'e', n: 'span',
+  c: [{ k: 'e', n: 'b', c: [{ k: 'd', i: 0 }] }, { k: 'd', i: 1 }],
+};
+// 循环每一项：<li data-key={名}>{名}</li>
+const ITEM: PlanNode = {
+  k: 'e', n: 'li', a: [{ k: 'd', n: 'data-key', i: 0 }], c: [{ k: 'd', i: 1 }],
+};
+// 外层：<div><h1>{标题}</h1>{徽章}{列表}</div>
+const PAGE: PlanNode = {
+  k: 'e', n: 'div',
+  c: [{ k: 'e', n: 'h1', c: [{ k: 'd', i: 0 }] }, { k: 'd', i: 1 }, { k: 'd', i: 2 }],
+};
+const 三项 = [
+  [S('甲'), T('甲')],
+  [S('乙'), T('乙')],
+  [S('丙'), T('丙')],
+];
+const 首帧 = () => [
+  T('看板'),
+  C(BADGE, [T('三宝'), T('50')]),
+  L(ITEM, 三项.map((x) => x.slice())),
+];
+
+describe('嵌套子模板', () => {
+  it('信封里的 plan + slots 自己重渲（h 字段客户端不用）', () => {
+    expect(renderPlan(PAGE, 首帧()))
+      .toBe('<div><h1>看板</h1><span><b>三宝</b>50</span>'
+        + '<li data-key="甲">甲</li><li data-key="乙">乙</li><li data-key="丙">丙</li></div>');
+  });
+
+  it('钻进子模板只改一个槽位', () => {
+    const st = new TemplateState();
+    st.reset(PAGE, 首帧());
+    const html = st.patch({ '1': { c: { '1': T('65') } } });
+    expect(html).toContain('<b>三宝</b>65');
+    expect(html).toContain('看板');          // 外层没动
+  });
+
+  it('子模板整体换掉（换了模板时服务端发整值）', () => {
+    const st = new TemplateState();
+    st.reset(PAGE, 首帧());
+    const html = st.patch({ '1': C({ k: 'e', n: 'em', c: [{ k: 'd', i: 0 }] }, [T('换了')]) });
+    expect(html).toContain('<em>换了</em>');
+    expect(html).not.toContain('<b>三宝</b>');
+  });
+});
+
+describe('循环', () => {
+  it('改一项里的一个槽位，其他项原样不动', () => {
+    const st = new TemplateState();
+    st.reset(PAGE, 首帧());
+    const html = st.patch({ '2': { l: { n: 3, i: { '1': { '1': T('乙改了') } } } } });
+    expect(html).toContain('<li data-key="乙">乙改了</li>');
+    expect(html).toContain('<li data-key="甲">甲</li>');
+    expect(html).toContain('<li data-key="丙">丙</li>');
+  });
+
+  it('末尾新增一项：只发那一项的完整槽位', () => {
+    const st = new TemplateState();
+    st.reset(PAGE, 首帧());
+    const html = st.patch({ '2': { l: { n: 4, i: { '3': [S('丁'), T('丁')] } } } });
+    expect(html).toContain('<li data-key="丁">丁</li>');
+    expect((html!.match(/<li /g) || []).length).toBe(4);
+  });
+
+  it('删项：n 变小就截断，哪怕 i 是空的', () => {
+    const st = new TemplateState();
+    st.reset(PAGE, 首帧());
+    const html = st.patch({ '2': { l: { n: 1, i: {} } } });
+    expect((html!.match(/<li /g) || []).length).toBe(1);
+    expect(html).toContain('data-key="甲"');
+  });
+
+  it('空列表渲染成空串，不是崩', () => {
+    expect(renderPlan(PAGE, [T('空'), C(BADGE, [T('x'), T('0')]), L(ITEM, [])]))
+      .toBe('<div><h1>空</h1><span><b>x</b>0</span></div>');
+  });
+
+  it('补丁连着打，状态是累积的', () => {
+    const st = new TemplateState();
+    st.reset(PAGE, 首帧());
+    st.patch({ '2': { l: { n: 3, i: { '0': { '1': T('甲改') } } } } });
+    const html = st.patch({ '0': T('新标题') });
+    expect(html).toContain('新标题');
+    expect(html).toContain('>甲改<');     // 上一轮的改动还在
+  });
+});
+
+describe('补丁形状对不上就退回全量', () => {
+  it('说要钻进子模板、手上却是普通字符串 → 返回 null', () => {
+    const st = new TemplateState();
+    st.reset(CARD, [T('三宝'), T('50')]);
+    expect(st.patch({ '0': { c: { '0': T('x') } } })).toBeNull();
+  });
+
+  it('说是循环、手上是子模板 → 返回 null', () => {
+    const st = new TemplateState();
+    st.reset(PAGE, 首帧());
+    expect(st.patch({ '1': { l: { n: 1, i: {} } } })).toBeNull();
+  });
+
+  it('退回之后不再半吊子打补丁（等服务端发全量）', () => {
+    const st = new TemplateState();
+    st.reset(PAGE, 首帧());
+    st.patch({ '1': { l: { n: 1, i: {} } } });
+    expect(st.ready).toBe(false);
+    expect(st.patch({ '0': T('随便') })).toBeNull();
+  });
+});
+
+/**
+ * 补丁回放（黄金样本）—— 服务端真实产物端到端。
+ *
+ * fixtures-patch.json 是一串**连续帧**：首帧带 plan+slots，之后每帧只有服务端
+ * 算出来的 parts，每帧都记着服务端那一刻渲染出的 html（生成脚本见 README）。
+ * 这里按帧顺序打补丁，每一步都要和服务端的 html 逐字节相同。
+ *
+ * 前面那组黄金样本只验「同一份 plan+slots 两边渲染一致」；这组验的是
+ * **补丁语义**：钻进子模板、钻进循环、改项、加项、删项、整体挪位。
+ * 服务端 模板槽位差异 和客户端 applyParts/applyLoop 是一对，一边改了另一边没跟上，
+ * 线上表现是「点几下之后页面莫名其妙对不上」，不会报错 —— 只有这组能拦住。
+ */
+import patchFixtures from './fixtures-patch.json';
+
+describe('补丁回放：服务端算的 parts，客户端要还原出同样的 HTML', () => {
+  type Step = { 说明: string; plan?: PlanNode; slots?: string[]; parts?: Record<string, any>; html: string };
+  const steps = patchFixtures as Step[];
+
+  it('样本不是空的，且覆盖到嵌套与循环', () => {
+    expect(steps.length).toBeGreaterThan(3);
+    const all = JSON.stringify(steps);
+    expect(all).toContain('"c":');   // 钻进子模板的补丁
+    expect(all).toContain('"l":');   // 钻进循环的补丁
+  });
+
+  it('按帧顺序打补丁，每一步都和服务端逐字节相同', () => {
+    const st = new TemplateState();
+    steps.forEach((step, i) => {
+      let html: string | null;
+      if (step.plan && step.slots) {
+        st.reset(step.plan, step.slots);
+        html = renderPlan(step.plan, step.slots);
+      } else {
+        html = st.patch(step.parts!);
+      }
+      expect(html, `第 ${i + 1} 步「${step.说明}」`).toBe(step.html);
+    });
+  });
+
+  it('补丁确实比整帧小得多（不然这套机制就白做了）', () => {
+    const 首帧 = steps[0].html.length;
+    for (const step of steps.slice(1)) {
+      const 补丁 = JSON.stringify(step.parts).length;
+      expect(补丁, `「${step.说明}」的补丁不该接近整帧`).toBeLessThan(首帧 / 2);
+    }
   });
 });

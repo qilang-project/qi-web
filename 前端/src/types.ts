@@ -1,4 +1,4 @@
-import type { PlanNode } from './template';
+import type { PlanNode, SlotPatch, SlotValue } from './template';
 
 /** 页面里由 qi 侧注入的配置：<script>window.QI_LIVE={ws:"/x/ws",sub:{...},hb:30000}</script> */
 export interface LiveConfig {
@@ -18,9 +18,12 @@ export interface Frame {
   /** 结构化 diff：模板静态计划（跟 html 一起来，只在模板变化时重发） */
   plan?: PlanNode;
   /** 结构化 diff：全量槽位（跟 plan 一起来） */
-  slots?: string[];
-  /** 结构化 diff：稀疏槽位更新 {"下标": "新值"} —— 常态帧，通常只有几十字节 */
-  parts?: Record<string, string>;
+  slots?: SlotValue[];
+  /**
+   * 结构化 diff：稀疏槽位更新 —— 常态帧，通常只有几十到一百多字节。
+   * 值是字符串就整槽替换；`{c:…}` 钻进嵌套的 HTML{}；`{l:…}` 钻进 对于={} 循环。
+   */
+  parts?: Record<string, SlotPatch>;
   commands?: Command[];
   denied?: string;
 }

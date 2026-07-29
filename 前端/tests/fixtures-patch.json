@@ -1,0 +1,184 @@
+[
+  {
+    "说明": "首帧",
+    "plan": {
+      "c": [
+        {
+          "k": "t",
+          "v": "\n        "
+        },
+        {
+          "a": [
+            {
+              "k": "s",
+              "n": "class",
+              "v": "board"
+            }
+          ],
+          "c": [
+            {
+              "k": "t",
+              "v": "\n            "
+            },
+            {
+              "a": [],
+              "c": [
+                {
+                  "i": 0,
+                  "k": "d"
+                }
+              ],
+              "k": "e",
+              "n": "h1"
+            },
+            {
+              "k": "t",
+              "v": "\n            "
+            },
+            {
+              "a": [],
+              "c": [
+                {
+                  "i": 1,
+                  "k": "d"
+                }
+              ],
+              "k": "e",
+              "n": "p"
+            },
+            {
+              "k": "t",
+              "v": "\n            "
+            },
+            {
+              "a": [],
+              "c": [
+                {
+                  "i": 2,
+                  "k": "d"
+                }
+              ],
+              "k": "e",
+              "n": "ul"
+            },
+            {
+              "k": "t",
+              "v": "\n        "
+            }
+          ],
+          "k": "e",
+          "n": "div"
+        },
+        {
+          "k": "t",
+          "v": "\n    "
+        }
+      ],
+      "k": "f"
+    },
+    "slots": [
+      "__QI_HTML_T__看板",
+      "__QI_HTML_C__{\"p\":{\"c\":[{\"k\":\"t\",\"v\":\" \"},{\"a\":[{\"k\":\"s\",\"n\":\"class\",\"v\":\"qi-badge\"}],\"c\":[{\"k\":\"t\",\"v\":\"共 \"},{\"i\":0,\"k\":\"d\"},{\"k\":\"t\",\"v\":\" 项\"}],\"k\":\"e\",\"n\":\"span\"},{\"k\":\"t\",\"v\":\" \"}],\"k\":\"f\"},\"s\":[\"__QI_HTML_T__4\"],\"h\":\" <span class=\\\"qi-badge\\\">共 4 项</span> \"}",
+      "__QI_HTML_L__{\"p\":{\"a\":[{\"i\":0,\"k\":\"d\",\"n\":\"data-key\"},{\"k\":\"s\",\"n\":\"class\",\"v\":\"qi-item\"}],\"c\":[{\"a\":[],\"c\":[{\"i\":1,\"k\":\"d\"}],\"k\":\"e\",\"n\":\"span\"},{\"a\":[{\"k\":\"s\",\"n\":\"data-click\",\"v\":\"删\"},{\"i\":2,\"k\":\"d\",\"n\":\"data-value-name\"}],\"c\":[{\"k\":\"t\",\"v\":\"删\"}],\"k\":\"e\",\"n\":\"button\"}],\"k\":\"e\",\"n\":\"li\"},\"s\":[[\"__QI_HTML_S__甲\",\"__QI_HTML_T__甲\",\"__QI_HTML_S__甲\"],[\"__QI_HTML_S__乙\",\"__QI_HTML_T__乙\",\"__QI_HTML_S__乙\"],[\"__QI_HTML_S__丙\",\"__QI_HTML_T__丙\",\"__QI_HTML_S__丙\"],[\"__QI_HTML_S__丁\",\"__QI_HTML_T__丁\",\"__QI_HTML_S__丁\"]],\"h\":\"<li data-key=\\\"甲\\\" class=\\\"qi-item\\\"><span>甲</span><button data-click=\\\"删\\\" data-value-name=\\\"甲\\\">删</button></li><li data-key=\\\"乙\\\" class=\\\"qi-item\\\"><span>乙</span><button data-click=\\\"删\\\" data-value-name=\\\"乙\\\">删</button></li><li data-key=\\\"丙\\\" class=\\\"qi-item\\\"><span>丙</span><button data-click=\\\"删\\\" data-value-name=\\\"丙\\\">删</button></li><li data-key=\\\"丁\\\" class=\\\"qi-item\\\"><span>丁</span><button data-click=\\\"删\\\" data-value-name=\\\"丁\\\">删</button></li>\"}"
+    ],
+    "html": "\n        <div class=\"board\">\n            <h1>看板</h1>\n            <p> <span class=\"qi-badge\">共 4 项</span> </p>\n            <ul><li data-key=\"甲\" class=\"qi-item\"><span>甲</span><button data-click=\"删\" data-value-name=\"甲\">删</button></li><li data-key=\"乙\" class=\"qi-item\"><span>乙</span><button data-click=\"删\" data-value-name=\"乙\">删</button></li><li data-key=\"丙\" class=\"qi-item\"><span>丙</span><button data-click=\"删\" data-value-name=\"丙\">删</button></li><li data-key=\"丁\" class=\"qi-item\"><span>丁</span><button data-click=\"删\" data-value-name=\"丁\">删</button></li></ul>\n        </div>\n    "
+  },
+  {
+    "说明": "改中间一项",
+    "parts": {
+      "2": {
+        "l": {
+          "n": 4,
+          "i": {
+            "1": {
+              "0": "__QI_HTML_S__改过的乙",
+              "1": "__QI_HTML_T__改过的乙",
+              "2": "__QI_HTML_S__改过的乙"
+            }
+          }
+        }
+      }
+    },
+    "html": "\n        <div class=\"board\">\n            <h1>看板</h1>\n            <p> <span class=\"qi-badge\">共 4 项</span> </p>\n            <ul><li data-key=\"甲\" class=\"qi-item\"><span>甲</span><button data-click=\"删\" data-value-name=\"甲\">删</button></li><li data-key=\"改过的乙\" class=\"qi-item\"><span>改过的乙</span><button data-click=\"删\" data-value-name=\"改过的乙\">删</button></li><li data-key=\"丙\" class=\"qi-item\"><span>丙</span><button data-click=\"删\" data-value-name=\"丙\">删</button></li><li data-key=\"丁\" class=\"qi-item\"><span>丁</span><button data-click=\"删\" data-value-name=\"丁\">删</button></li></ul>\n        </div>\n    "
+  },
+  {
+    "说明": "末尾加一项",
+    "parts": {
+      "1": {
+        "c": {
+          "0": "__QI_HTML_T__5"
+        }
+      },
+      "2": {
+        "l": {
+          "n": 5,
+          "i": {
+            "4": [
+              "__QI_HTML_S__戊",
+              "__QI_HTML_T__戊",
+              "__QI_HTML_S__戊"
+            ]
+          }
+        }
+      }
+    },
+    "html": "\n        <div class=\"board\">\n            <h1>看板</h1>\n            <p> <span class=\"qi-badge\">共 5 项</span> </p>\n            <ul><li data-key=\"甲\" class=\"qi-item\"><span>甲</span><button data-click=\"删\" data-value-name=\"甲\">删</button></li><li data-key=\"改过的乙\" class=\"qi-item\"><span>改过的乙</span><button data-click=\"删\" data-value-name=\"改过的乙\">删</button></li><li data-key=\"丙\" class=\"qi-item\"><span>丙</span><button data-click=\"删\" data-value-name=\"丙\">删</button></li><li data-key=\"丁\" class=\"qi-item\"><span>丁</span><button data-click=\"删\" data-value-name=\"丁\">删</button></li><li data-key=\"戊\" class=\"qi-item\"><span>戊</span><button data-click=\"删\" data-value-name=\"戊\">删</button></li></ul>\n        </div>\n    "
+  },
+  {
+    "说明": "删到只剩两项",
+    "parts": {
+      "1": {
+        "c": {
+          "0": "__QI_HTML_T__2"
+        }
+      },
+      "2": {
+        "l": {
+          "n": 2,
+          "i": {}
+        }
+      }
+    },
+    "html": "\n        <div class=\"board\">\n            <h1>看板</h1>\n            <p> <span class=\"qi-badge\">共 2 项</span> </p>\n            <ul><li data-key=\"甲\" class=\"qi-item\"><span>甲</span><button data-click=\"删\" data-value-name=\"甲\">删</button></li><li data-key=\"改过的乙\" class=\"qi-item\"><span>改过的乙</span><button data-click=\"删\" data-value-name=\"改过的乙\">删</button></li></ul>\n        </div>\n    "
+  },
+  {
+    "说明": "只改标题",
+    "parts": {
+      "0": "__QI_HTML_T__新标题"
+    },
+    "html": "\n        <div class=\"board\">\n            <h1>新标题</h1>\n            <p> <span class=\"qi-badge\">共 2 项</span> </p>\n            <ul><li data-key=\"甲\" class=\"qi-item\"><span>甲</span><button data-click=\"删\" data-value-name=\"甲\">删</button></li><li data-key=\"改过的乙\" class=\"qi-item\"><span>改过的乙</span><button data-click=\"删\" data-value-name=\"改过的乙\">删</button></li></ul>\n        </div>\n    "
+  },
+  {
+    "说明": "开头插一项（后面全挪位）",
+    "parts": {
+      "1": {
+        "c": {
+          "0": "__QI_HTML_T__3"
+        }
+      },
+      "2": {
+        "l": {
+          "n": 3,
+          "i": {
+            "0": {
+              "0": "__QI_HTML_S__零",
+              "1": "__QI_HTML_T__零",
+              "2": "__QI_HTML_S__零"
+            },
+            "1": {
+              "0": "__QI_HTML_S__甲",
+              "1": "__QI_HTML_T__甲",
+              "2": "__QI_HTML_S__甲"
+            },
+            "2": [
+              "__QI_HTML_S__改过的乙",
+              "__QI_HTML_T__改过的乙",
+              "__QI_HTML_S__改过的乙"
+            ]
+          }
+        }
+      }
+    },
+    "html": "\n        <div class=\"board\">\n            <h1>新标题</h1>\n            <p> <span class=\"qi-badge\">共 3 项</span> </p>\n            <ul><li data-key=\"零\" class=\"qi-item\"><span>零</span><button data-click=\"删\" data-value-name=\"零\">删</button></li><li data-key=\"甲\" class=\"qi-item\"><span>甲</span><button data-click=\"删\" data-value-name=\"甲\">删</button></li><li data-key=\"改过的乙\" class=\"qi-item\"><span>改过的乙</span><button data-click=\"删\" data-value-name=\"改过的乙\">删</button></li></ul>\n        </div>\n    "
+  }
+]
