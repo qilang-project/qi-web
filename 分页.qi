@@ -87,8 +87,8 @@
     变量 每页文本: 字符串 = 整数转字符串(信息.每页);
     变量 页文本: 字符串 = 整数转字符串(信息.页码) + " / " + 整数转字符串(信息.总页数);
     返回 HTML { <nav class="qi-pagination" aria-label="分页">
-        <button 如果={信息.有上一页 == 1} data-点击={事件名} data-值-page={前页} data-值-page_size={每页文本}>← 上一页</button>
+        <button 如果={信息.有上一页 == 1} data-click={事件名} data-value-page={前页} data-value-page_size={每页文本}>← 上一页</button>
         <span>{页文本}</span>
-        <button 如果={信息.有下一页 == 1} data-点击={事件名} data-值-page={后页} data-值-page_size={每页文本}>下一页 →</button>
+        <button 如果={信息.有下一页 == 1} data-click={事件名} data-value-page={后页} data-value-page_size={每页文本}>下一页 →</button>
     </nav> };
 }
