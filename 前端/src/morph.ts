@@ -50,15 +50,15 @@ function syncAttrs(f: Element, t: Element): void {
   // 服务端渲染的版本 —— 展开的菜单会在下一帧莫名其妙合上（哪怕那一帧跟菜单
   // 毫无关系，比如一个定时器滴答）。写了这个属性就把这两项让给客户端。
   const keep = t.hasAttribute('data-js-keep');
-  const 让给客户端 = (name: string) => keep && (name === 'class' || name === 'style');
+  const clientOwned = (name: string) => keep && (name === 'class' || name === 'style');
 
   for (let i = f.attributes.length - 1; i >= 0; i--) {
     const a = f.attributes[i].name;
-    if (!t.hasAttribute(a) && !让给客户端(a)) f.removeAttribute(a);
+    if (!t.hasAttribute(a) && !clientOwned(a)) f.removeAttribute(a);
   }
   for (let i = 0; i < t.attributes.length; i++) {
     const a = t.attributes[i];
-    if (让给客户端(a.name)) continue;
+    if (clientOwned(a.name)) continue;
     if (f.getAttribute(a.name) !== a.value) f.setAttribute(a.name, a.value);
   }
   // 表单控件的「活值」：非焦点元素跟随服务端；焦点元素不动（保住正在输入的内容）

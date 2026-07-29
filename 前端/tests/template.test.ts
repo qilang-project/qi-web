@@ -210,27 +210,27 @@ const PAGE: PlanNode = {
   k: 'e', n: 'div',
   c: [{ k: 'e', n: 'h1', c: [{ k: 'd', i: 0 }] }, { k: 'd', i: 1 }, { k: 'd', i: 2 }],
 };
-const 三项 = [
+const THREE = [
   [S('甲'), T('甲')],
   [S('乙'), T('乙')],
   [S('丙'), T('丙')],
 ];
-const 首帧 = () => [
+const firstFrame = () => [
   T('看板'),
   C(BADGE, [T('三宝'), T('50')]),
-  L(ITEM, 三项.map((x) => x.slice())),
+  L(ITEM, THREE.map((x) => x.slice())),
 ];
 
 describe('嵌套子模板', () => {
   it('信封里的 plan + slots 自己重渲（h 字段客户端不用）', () => {
-    expect(renderPlan(PAGE, 首帧()))
+    expect(renderPlan(PAGE, firstFrame()))
       .toBe('<div><h1>看板</h1><span><b>三宝</b>50</span>'
         + '<li data-key="甲">甲</li><li data-key="乙">乙</li><li data-key="丙">丙</li></div>');
   });
 
   it('钻进子模板只改一个槽位', () => {
     const st = new TemplateState();
-    st.reset(PAGE, 首帧());
+    st.reset(PAGE, firstFrame());
     const html = st.patch({ '1': { c: { '1': T('65') } } });
     expect(html).toContain('<b>三宝</b>65');
     expect(html).toContain('看板');          // 外层没动
@@ -238,7 +238,7 @@ describe('嵌套子模板', () => {
 
   it('子模板整体换掉（换了模板时服务端发整值）', () => {
     const st = new TemplateState();
-    st.reset(PAGE, 首帧());
+    st.reset(PAGE, firstFrame());
     const html = st.patch({ '1': C({ k: 'e', n: 'em', c: [{ k: 'd', i: 0 }] }, [T('换了')]) });
     expect(html).toContain('<em>换了</em>');
     expect(html).not.toContain('<b>三宝</b>');
@@ -248,7 +248,7 @@ describe('嵌套子模板', () => {
 describe('循环', () => {
   it('改一项里的一个槽位，其他项原样不动', () => {
     const st = new TemplateState();
-    st.reset(PAGE, 首帧());
+    st.reset(PAGE, firstFrame());
     const html = st.patch({ '2': { l: { n: 3, i: { '1': { '1': T('乙改了') } } } } });
     expect(html).toContain('<li data-key="乙">乙改了</li>');
     expect(html).toContain('<li data-key="甲">甲</li>');
@@ -257,7 +257,7 @@ describe('循环', () => {
 
   it('末尾新增一项：只发那一项的完整槽位', () => {
     const st = new TemplateState();
-    st.reset(PAGE, 首帧());
+    st.reset(PAGE, firstFrame());
     const html = st.patch({ '2': { l: { n: 4, i: { '3': [S('丁'), T('丁')] } } } });
     expect(html).toContain('<li data-key="丁">丁</li>');
     expect((html!.match(/<li /g) || []).length).toBe(4);
@@ -265,7 +265,7 @@ describe('循环', () => {
 
   it('删项：n 变小就截断，哪怕 i 是空的', () => {
     const st = new TemplateState();
-    st.reset(PAGE, 首帧());
+    st.reset(PAGE, firstFrame());
     const html = st.patch({ '2': { l: { n: 1, i: {} } } });
     expect((html!.match(/<li /g) || []).length).toBe(1);
     expect(html).toContain('data-key="甲"');
@@ -278,7 +278,7 @@ describe('循环', () => {
 
   it('补丁连着打，状态是累积的', () => {
     const st = new TemplateState();
-    st.reset(PAGE, 首帧());
+    st.reset(PAGE, firstFrame());
     st.patch({ '2': { l: { n: 3, i: { '0': { '1': T('甲改') } } } } });
     const html = st.patch({ '0': T('新标题') });
     expect(html).toContain('新标题');
@@ -295,13 +295,13 @@ describe('补丁形状对不上就退回全量', () => {
 
   it('说是循环、手上是子模板 → 返回 null', () => {
     const st = new TemplateState();
-    st.reset(PAGE, 首帧());
+    st.reset(PAGE, firstFrame());
     expect(st.patch({ '1': { l: { n: 1, i: {} } } })).toBeNull();
   });
 
   it('退回之后不再半吊子打补丁（等服务端发全量）', () => {
     const st = new TemplateState();
-    st.reset(PAGE, 首帧());
+    st.reset(PAGE, firstFrame());
     st.patch({ '1': { l: { n: 1, i: {} } } });
     expect(st.ready).toBe(false);
     expect(st.patch({ '0': T('随便') })).toBeNull();
@@ -323,7 +323,7 @@ describe('补丁形状对不上就退回全量', () => {
 import patchFixtures from './fixtures-patch.json';
 
 describe('补丁回放：服务端算的 parts，客户端要还原出同样的 HTML', () => {
-  type Step = { 说明: string; plan?: PlanNode; slots?: string[]; parts?: Record<string, any>; html: string };
+  type Step = { desc: string; plan?: PlanNode; slots?: string[]; parts?: Record<string, any>; html: string };
   const steps = patchFixtures as Step[];
 
   it('样本不是空的，且覆盖到嵌套与循环', () => {
@@ -343,7 +343,7 @@ describe('补丁回放：服务端算的 parts，客户端要还原出同样的 
       } else {
         html = st.patch(step.parts!);
       }
-      expect(html, `第 ${i + 1} 步「${step.说明}」`).toBe(step.html);
+      expect(html, `第 ${i + 1} 步「${step.desc}」`).toBe(step.html);
     });
   });
 
@@ -351,7 +351,7 @@ describe('补丁回放：服务端算的 parts，客户端要还原出同样的 
     const 首帧 = steps[0].html.length;
     for (const step of steps.slice(1)) {
       const 补丁 = JSON.stringify(step.parts).length;
-      expect(补丁, `「${step.说明}」的补丁不该接近整帧`).toBeLessThan(首帧 / 2);
+      expect(补丁, `「${step.desc}」的补丁不该接近整帧`).toBeLessThan(首帧 / 2);
     }
   });
 });

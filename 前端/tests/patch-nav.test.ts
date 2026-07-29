@@ -7,11 +7,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { pushTo, urlPayload } from '../src/patch-nav';
 
-function 落地(url: string): void {
+function goTo(url: string): void {
   history.replaceState({}, '', url);
 }
 
-beforeEach(() => 落地('/board?tab=待办'));
+beforeEach(() => goTo('/board?tab=待办'));
 
 describe('urlPayload', () => {
   it('拆出路径和查询', () => {
@@ -19,17 +19,17 @@ describe('urlPayload', () => {
   });
 
   it('多个查询值都在，值一律是字符串', () => {
-    落地('/board?tab=已完成&page=2');
+    goTo('/board?tab=已完成&page=2');
     expect(urlPayload()).toEqual({ path: '/board', query: { tab: '已完成', page: '2' } });
   });
 
   it('没有查询串时 query 是空对象，不是 undefined', () => {
-    落地('/board');
+    goTo('/board');
     expect(urlPayload()).toEqual({ path: '/board', query: {} });
   });
 
   it('百分号编码的中文要解出来（服务端拿到的是原文）', () => {
-    落地('/board?tab=' + encodeURIComponent('进行中'));
+    goTo('/board?tab=' + encodeURIComponent('进行中'));
     expect(urlPayload().query).toEqual({ tab: '进行中' });
   });
 

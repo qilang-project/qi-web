@@ -14,13 +14,13 @@ import type { Payload } from './types';
 /** 每块原始字节数；base64 之后约 341KB 一帧 */
 const CHUNK = 256 * 1024;
 
-type 发送 = (event: string, payload: Payload) => void;
+type Send = (event: string, payload: Payload) => void;
 
 /** 同一条连接里保证 id 不重样（时间戳 + 自增） */
-let 序号 = 0;
-function 新编号(): string {
-  序号 += 1;
-  return 'u' + Date.now().toString(36) + '_' + 序号;
+let seq = 0;
+function nextId(): string {
+  seq += 1;
+  return 'u' + Date.now().toString(36) + '_' + seq;
 }
 
 function toBase64(buf: ArrayBuffer): string {
@@ -38,35 +38,35 @@ function toBase64(buf: ArrayBuffer): string {
  * accept 匹配：支持 "image/*"、".jpg"、"image/png" 逗号分隔。
  * 只是体验上的提前拦截 —— 服务端会独立再判一次，这里放过去了也不要紧。
  */
-function 合规(file: File, accept: string): boolean {
-  const 规则 = (accept || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
-  if (!规则.length) return true;
-  const 类型 = (file.type || '').toLowerCase();
-  const 名字 = file.name.toLowerCase();
-  return 规则.some((r) => {
-    if (r.startsWith('.')) return 名字.endsWith(r);
-    if (r.endsWith('/*')) return 类型.startsWith(r.slice(0, -1));
-    return 类型 === r;
+function matchesAccept(file: File, accept: string): boolean {
+  const rules = (accept || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  if (!rules.length) return true;
+  const mime = (file.type || '').toLowerCase();
+  const fileName = file.name.toLowerCase();
+  return rules.some((r) => {
+    if (r.startsWith('.')) return fileName.endsWith(r);
+    if (r.endsWith('/*')) return mime.startsWith(r.slice(0, -1));
+    return mime === r;
   });
 }
 
-async function 送一个(发: 发送, 组名: string, id: string, file: File): Promise<void> {
-  let 位置 = 0;
+async function sendOne(send: Send, group: string, id: string, file: File): Promise<void> {
+  let pos = 0;
   // 一块一块读，不把整个文件读进内存 —— 8MB 的图不该在浏览器里也占一份
-  while (位置 < file.size) {
-    const 尾 = Math.min(位置 + CHUNK, file.size);
-    const buf = await file.slice(位置, 尾).arrayBuffer();
-    位置 = 尾;
-    发('__上传块__', {
-      up: 组名,
+  while (pos < file.size) {
+    const end = Math.min(pos + CHUNK, file.size);
+    const buf = await file.slice(pos, end).arrayBuffer();
+    pos = end;
+    send('__上传块__', {
+      up: group,
       id,
       b: toBase64(buf),
-      last: 位置 >= file.size ? 1 : 0,
+      last: pos >= file.size ? 1 : 0,
     });
   }
   // 空文件也要收尾，否则服务端那条永远停在「传输中」
   if (file.size === 0) {
-    发('__上传块__', { up: 组名, id, b: '', last: 1 });
+    send('__上传块__', { up: group, id, b: '', last: 1 });
   }
 }
 
@@ -76,46 +76,46 @@ async function 送一个(发: 发送, 组名: string, id: string, file: File): P
  * 一次只送一个文件：并发送并不会更快（同一条 WS 排队），但会让进度条乱跳，
  * 而且服务端要同时开好几个临时文件。
  */
-export async function 上传这些(发: 发送, 组名: string, 文件表: File[], 输入: HTMLInputElement): Promise<void> {
-  const 上限字节 = parseInt(输入.getAttribute('data-upload-max') || '0', 10);
-  const 上限个数 = parseInt(输入.getAttribute('data-upload-count') || '0', 10) || 文件表.length;
-  const accept = 输入.getAttribute('accept') || '';
+export async function uploadFiles(send: Send, group: string, files: File[], input: HTMLInputElement): Promise<void> {
+  const maxBytes = parseInt(input.getAttribute('data-upload-max') || '0', 10);
+  const maxCount = parseInt(input.getAttribute('data-upload-count') || '0', 10) || files.length;
+  const accept = input.getAttribute('accept') || '';
 
-  const 要送: Array<{ id: string; file: File }> = [];
-  const 元数据: Array<Record<string, unknown>> = [];
+  const queue: Array<{ id: string; file: File }> = [];
+  const metas: Array<Record<string, unknown>> = [];
 
-  文件表.slice(0, 上限个数).forEach((file) => {
-    const id = 新编号();
-    元数据.push({ cid: id, name: file.name, size: file.size, type: file.type });
+  files.slice(0, maxCount).forEach((file) => {
+    const id = nextId();
+    metas.push({ cid: id, name: file.name, size: file.size, type: file.type });
     // 本地先挡一道：200MB 的文件不该先传完再被告知太大。
     // 服务端仍会独立判 —— 这里只是省一趟往返，不是安全边界。
-    const 太大 = 上限字节 > 0 && file.size > 上限字节;
-    if (!太大 && 合规(file, accept)) 要送.push({ id, file });
+    const tooBig = maxBytes > 0 && file.size > maxBytes;
+    if (!tooBig && matchesAccept(file, accept)) queue.push({ id, file });
   });
 
-  if (!元数据.length) return;
-  发('__上传开始__', { up: 组名, entries: 元数据 });
+  if (!metas.length) return;
+  send('__上传开始__', { up: group, entries: metas });
 
-  for (const 项 of 要送) {
+  for (const item of queue) {
     try {
-      await 送一个(发, 组名, 项.id, 项.file);
+      await sendOne(send, group, item.id, item.file);
     } catch {
       // 读文件失败（用户中途拔了 U 盘之类）：这一个跳过，别把后面的也带停
-      发('__上传取消__', { up: 组名, id: 项.id });
+      send('__上传取消__', { up: group, id: item.id });
     }
   }
 }
 
 /** 绑定：文件框选择 + 拖放到 data-upload-drop 容器 */
-export function bindUploads(发: 发送): void {
+export function bindUploads(send: Send): void {
   document.addEventListener('change', (e) => {
     const el = e.target as HTMLInputElement | null;
     if (!el || !el.matches || !el.matches('input[type=file][data-upload]')) return;
-    const 组名 = el.getAttribute('data-upload') || '';
-    const 文件表 = Array.from(el.files || []);
+    const group = el.getAttribute('data-upload') || '';
+    const files = Array.from(el.files || []);
     // 清掉选择：同一个文件连选两次也要能触发（浏览器默认认为「没变化」）
     el.value = '';
-    if (文件表.length) void 上传这些(发, 组名, 文件表, el);
+    if (files.length) void uploadFiles(send, group, files, el);
   });
 
   // 拖放：容器上写 data-upload-drop="组名"，字节走和文件框完全一样的路
@@ -134,12 +134,12 @@ export function bindUploads(发: 发送): void {
     if (!box) return;
     e.preventDefault();
     box.classList.remove('qi-drop-on');
-    const 组名 = box.getAttribute('data-upload-drop') || '';
+    const group = box.getAttribute('data-upload-drop') || '';
     // 限制条件写在那个组的文件框上，拖放也照着它来
-    const 输入 = document.querySelector(
-      'input[type=file][data-upload="' + 组名.replace(/"/g, '') + '"]',
+    const input = document.querySelector(
+      'input[type=file][data-upload="' + group.replace(/"/g, '') + '"]',
     ) as HTMLInputElement | null;
-    const 文件表 = Array.from((e as DragEvent).dataTransfer?.files || []);
-    if (文件表.length && 输入) void 上传这些(发, 组名, 文件表, 输入);
+    const files = Array.from((e as DragEvent).dataTransfer?.files || []);
+    if (files.length && input) void uploadFiles(send, group, files, input);
   });
 }
