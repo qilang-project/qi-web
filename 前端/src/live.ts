@@ -14,6 +14,7 @@ import { qiStream } from './stream';
 import { qiRich } from './rich';
 import { TemplateState } from './template';
 import { applyStreams } from './stream-ops';
+import { parseOps, runOps } from './js-ops';
 
 let cfg: LiveConfig = { ws: '', sub: null, hb: 0 };
 let ws: WebSocket | null = null;
@@ -78,6 +79,8 @@ function runCmd(c: Command): void {
   else if (c.type === 'scroll') {
     const el = document.querySelector(c.target!);
     if (el) { try { el.scrollIntoView({ behavior: 'smooth', block: 'end' }); } catch { el.scrollIntoView(); } }
+  } else if (c.type === 'js') {
+    runOps(c.ops || [], null);
   } else if (c.type === 'event') {
     let d: unknown = null;
     try { d = JSON.parse(c.payloadText || 'null'); } catch { /* 载荷不是 JSON 就当 null */ }
@@ -162,6 +165,13 @@ function connect(): void {
 
 // ── 声明式绑定（事件委托：morph 换掉节点后无需重绑）──
 function bind(): void {
+  // 客户端动作：不经服务端，点了当场跑（展开折叠、闪一下、聚焦）。
+  // 与 data-click 互不干扰 —— 同一个元素两个都写就两件事都做。
+  document.addEventListener('click', (e) => {
+    const el = closestFrom(e.target, 'data-js-click');
+    if (el) runOps(parseOps(attr(el, 'data-js-click')), el);
+  });
+
   document.addEventListener('click', (e) => {
     const el = closestFrom(e.target, 'data-click');
     if (!el) return;

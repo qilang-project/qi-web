@@ -1,5 +1,6 @@
 import type { PlanNode, SlotPatch, SlotValue } from './template';
 import type { StreamPatch } from './stream-ops';
+import type { JsOp } from './js-ops';
 
 /** 页面里由 qi 侧注入的配置：<script>window.QI_LIVE={ws:"/x/ws",sub:{...},hb:30000}</script> */
 export interface LiveConfig {
@@ -37,6 +38,8 @@ export interface Command {
   text?: string;
   name?: string;
   payloadText?: string;
+  /** type==="js"：服务端下发的客户端动作串（对标 JS.exec） */
+  ops?: JsOp[];
 }
 
 export type Payload = Record<string, unknown>;

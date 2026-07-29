@@ -151,3 +151,45 @@ describe('无 key 的普通节点', () => {
     expect(root.children.length).toBe(1);
   });
 });
+
+/**
+ * data-js-keep —— 客户端动作改的 class/style 不被服务端冲掉。
+ *
+ * 没有这个开关的话，用 data-js-click 展开的菜单会在**下一帧**莫名其妙合上，
+ * 哪怕那一帧跟菜单毫无关系（一个定时器滴答就够了）。这是纯客户端交互和
+ * 服务端驱动 UI 的天然冲突点，只能显式划线。
+ */
+describe('data-js-keep', () => {
+  it('服务端不覆盖它的 class 和 style', () => {
+    const root = mount('<div data-key="m" data-js-keep class="panel"></div>');
+    const el = root.firstElementChild as HTMLElement;
+    // 客户端动作把它展开了
+    el.classList.add('open');
+    el.style.display = 'block';
+    // 下一帧服务端照旧渲染成没展开的样子
+    apply(root, '<div data-key="m" data-js-keep class="panel"></div>');
+    expect(el.classList.contains('open')).toBe(true);
+    expect(el.style.display).toBe('block');
+    expect(el.classList.contains('panel')).toBe(true);
+  });
+
+  it('其他属性照旧同步（只让出 class 和 style）', () => {
+    const root = mount('<div data-key="m" data-js-keep title="旧"></div>');
+    const el = root.firstElementChild as HTMLElement;
+    el.classList.add('open');
+    apply(root, '<div data-key="m" data-js-keep title="新" data-x="1"></div>');
+    expect(el.getAttribute('title')).toBe('新');
+    expect(el.getAttribute('data-x')).toBe('1');
+    expect(el.classList.contains('open')).toBe(true);
+  });
+
+  it('没写这个属性的元素照旧被服务端覆盖（默认行为不变）', () => {
+    const root = mount('<div data-key="m" class="panel"></div>');
+    const el = root.firstElementChild as HTMLElement;
+    el.classList.add('open');
+    el.style.display = 'block';
+    apply(root, '<div data-key="m" class="panel"></div>');
+    expect(el.classList.contains('open')).toBe(false);
+    expect(el.style.display).toBe('');
+  });
+});
