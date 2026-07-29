@@ -15,6 +15,7 @@ import { qiRich } from './rich';
 import { TemplateState } from './template';
 import { applyStreams } from './stream-ops';
 import { parseOps, runOps } from './js-ops';
+import { pushTo, urlPayload } from './patch-nav';
 
 let cfg: LiveConfig = { ws: '', sub: null, hb: 0 };
 let ws: WebSocket | null = null;
@@ -79,6 +80,9 @@ function runCmd(c: Command): void {
   else if (c.type === 'scroll') {
     const el = document.querySelector(c.target!);
     if (el) { try { el.scrollIntoView({ behavior: 'smooth', block: 'end' }); } catch { el.scrollIntoView(); } }
+  } else if (c.type === 'patch') {
+    // 服务端主动改 URL（push_patch）：不重新加载，照常上报参数
+    sendRaw('__参数__', pushTo(c.target!));
   } else if (c.type === 'js') {
     runOps(c.ops || [], null);
   } else if (c.type === 'event') {
@@ -145,6 +149,9 @@ function connect(): void {
     document.body.classList.remove('qi-offline');
     try { window.dispatchEvent(new CustomEvent('qi:online')); } catch { /* 旧浏览器 */ }
     if (cfg.sub) sendRaw('__订阅__', cfg.sub);
+    // 首屏是按真实 URL 直出的，但 WS 建的是一份全新状态 —— 报一次当前 URL。
+    // 只有开了轻路由的页面才报：这一趟在服务端要走 事件处理 + 渲染（常含查库）
+    if (cfg.nav) sendRaw('__参数__', urlPayload());
     if (hbTimer) clearInterval(hbTimer);
     if (cfg.sub && cfg.hb > 0) hbTimer = setInterval(() => sendRaw('__心跳__', {}), cfg.hb) as unknown as number;
   };
@@ -165,6 +172,24 @@ function connect(): void {
 
 // ── 声明式绑定（事件委托：morph 换掉节点后无需重绑）──
 function bind(): void {
+  // 轻路由：改地址栏 + 上报新 URL，不重建连接。
+  // 元素上通常还写着 href（右键新开标签页 / 禁用 JS 时能用），所以要 preventDefault。
+  document.addEventListener('click', (e) => {
+    if (!cfg.nav) return;
+    const el = closestFrom(e.target, 'data-patch');
+    if (!el) return;
+    const ev = e as MouseEvent;
+    // 新标签页/新窗口这些浏览器原生手势不拦
+    if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey || ev.button !== 0) return;
+    e.preventDefault();
+    sendRaw('__参数__', pushTo(attr(el, 'data-patch') || ''));
+  });
+
+  // 前进 / 后退：地址栏已经由浏览器改好了，只补一次上报（不能再 pushState）
+  window.addEventListener('popstate', () => {
+    if (cfg.nav) sendRaw('__参数__', urlPayload());
+  });
+
   // 客户端动作：不经服务端，点了当场跑（展开折叠、闪一下、聚焦）。
   // 与 data-click 互不干扰 —— 同一个元素两个都写就两件事都做。
   document.addEventListener('click', (e) => {

@@ -10,6 +10,13 @@ export interface LiveConfig {
   sub: Record<string, unknown> | null;
   /** 心跳间隔毫秒，0 = 关闭 */
   hb: number;
+  /**
+   * 1 = 这个页面用轻路由（实时参数.qi）：连上报一次 URL、拦 data-patch、听前进后退。
+   *
+   * 默认关着：那一次上报会在服务端走一遍 事件处理函数 + 渲染函数，而渲染常常要
+   * 查库 —— 不用轻路由的页面不该白付这笔。
+   */
+  nav?: number;
 }
 
 /** 下行帧：整区 HTML / 字节增量 / 结构化槽位 / 浏览器指令 / 准入拒绝 */
