@@ -589,6 +589,63 @@ button.icon:hover {
   color: var(--qi-danger);
 }
 
+/* ── 上传（上传.qi 的 上传输入 / 上传进度）───────────────────────── */
+
+.qi-upload {
+  display: inline-block;
+}
+
+.qi-upload input[type='file'] {
+  display: none;
+}
+
+.qi-upload-btn {
+  display: inline-block;
+  padding: 8px 16px;
+  border: 1px dashed var(--qi-line-strong);
+  border-radius: var(--qi-radius-sm);
+  color: var(--qi-ink-soft);
+  cursor: pointer;
+}
+
+.qi-upload-btn:hover {
+  border-color: var(--qi-accent);
+  color: var(--qi-accent);
+}
+
+.qi-upload-list {
+  list-style: none;
+  margin: var(--qi-gap) 0 0;
+  padding: 0;
+}
+
+.qi-upload-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0 8px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--qi-line);
+}
+
+.qi-upload-item .qi-track,
+.qi-upload-item .qi-err {
+  grid-column: 1 / -1;
+}
+
+.qi-upload-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+}
+
+/* 拖放中的容器 */
+.qi-drop-on {
+  border-color: var(--qi-accent);
+  background: var(--qi-accent-soft);
+}
+
 @media (max-width: 640px) {
   :root {
     --qi-pad: 12px;

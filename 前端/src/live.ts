@@ -16,6 +16,7 @@ import { TemplateState } from './template';
 import { applyStreams } from './stream-ops';
 import { parseOps, runOps } from './js-ops';
 import { pushTo, urlPayload } from './patch-nav';
+import { bindUploads } from './upload';
 
 let cfg: LiveConfig = { ws: '', sub: null, hb: 0 };
 let ws: WebSocket | null = null;
@@ -264,6 +265,9 @@ function bind(): void {
     const ev = attr(f, 'data-change');
     if (ev) sendForm(f, ev, t);
   });
+
+  // 上传：文件框 + 拖放。字节走 sendRaw（框架保留事件，不带身份/loading 标记）
+  bindUploads(sendRaw);
 
   document.addEventListener('submit', (e) => {
     const f = closestFrom(e.target, 'data-submit') as HTMLFormElement | null;
