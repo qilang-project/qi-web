@@ -1,3 +1,5 @@
+import type { PlanNode } from './template';
+
 /** 页面里由 qi 侧注入的配置：<script>window.QI_LIVE={ws:"/x/ws",sub:{...},hb:30000}</script> */
 export interface LiveConfig {
   /** WebSocket 路径 */
@@ -8,10 +10,17 @@ export interface LiveConfig {
   hb: number;
 }
 
-/** 下行帧：整区 HTML / 增量补丁 / 浏览器指令 / 准入拒绝 */
+/** 下行帧：整区 HTML / 字节增量 / 结构化槽位 / 浏览器指令 / 准入拒绝 */
 export interface Frame {
   html?: string;
+  /** 字节级增量：前缀长度 / 后缀长度 / 中段替换内容 */
   patch?: { p: number; s: number; r: string };
+  /** 结构化 diff：模板静态计划（跟 html 一起来，只在模板变化时重发） */
+  plan?: PlanNode;
+  /** 结构化 diff：全量槽位（跟 plan 一起来） */
+  slots?: string[];
+  /** 结构化 diff：稀疏槽位更新 {"下标": "新值"} —— 常态帧，通常只有几十字节 */
+  parts?: Record<string, string>;
   commands?: Command[];
   denied?: string;
 }

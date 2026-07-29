@@ -12,6 +12,7 @@ import { injectStyle, qiConfirm } from './confirm';
 import { bindDropdowns } from './dropdown';
 import { qiStream } from './stream';
 import { qiRich } from './rich';
+import { TemplateState } from './template';
 
 let cfg: LiveConfig = { ws: '', sub: null, hb: 0 };
 let ws: WebSocket | null = null;
@@ -20,6 +21,8 @@ let delay = 500;
 let pending: Element[] = [];
 let denied = false;
 let lastHtml = '';
+// 结构化 diff 的客户端一半：存住模板计划，之后只收变化的槽位
+const tpl = new TemplateState();
 
 /** 身份字段自动并进每个事件载荷 —— 服务端据此认人，不信客户端另报的 id */
 function ident(p?: Payload): Payload {
@@ -77,6 +80,17 @@ function apply(m: Frame): void {
     try { window.dispatchEvent(new CustomEvent('qi:denied', { detail: m.denied })); } catch { /* 旧浏览器 */ }
     if (ws) { try { ws.close(); } catch { /* 已关 */ } }
     return;
+  }
+  // 结构化槽位帧：合并变化的下标，用模板计划重渲 —— 走同一套 morph。
+  // 拿不到计划（首帧还没到 / 服务端退回了字节 diff）时忽略，等下一帧全量。
+  if (m.parts !== undefined) {
+    const html = tpl.patch(m.parts);
+    if (html === null) return;
+    m = { html };
+  }
+  // 全量帧带计划：重置模板状态，之后的槽位帧才有的放矢
+  if (m.plan !== undefined && m.slots !== undefined) {
+    tpl.reset(m.plan, m.slots);
   }
   // 增量帧：用上一帧 + 前缀/后缀/中段拼回完整 HTML，再走同一套 morph
   if (m.patch !== undefined && lastHtml) {
