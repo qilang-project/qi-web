@@ -1,4 +1,5 @@
 import type { PlanNode, SlotPatch, SlotValue } from './template';
+import type { StreamPatch } from './stream-ops';
 
 /** 页面里由 qi 侧注入的配置：<script>window.QI_LIVE={ws:"/x/ws",sub:{...},hb:30000}</script> */
 export interface LiveConfig {
@@ -24,6 +25,8 @@ export interface Frame {
    * 值是字符串就整槽替换；`{c:…}` 钻进嵌套的 HTML{}；`{l:…}` 钻进 对于={} 循环。
    */
   parts?: Record<string, SlotPatch>;
+  /** 实时流：按 data-key 往容器里加/删项（对标 Phoenix Streams） */
+  streams?: StreamPatch[];
   commands?: Command[];
   denied?: string;
 }

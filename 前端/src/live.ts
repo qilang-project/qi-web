@@ -13,6 +13,7 @@ import { bindDropdowns } from './dropdown';
 import { qiStream } from './stream';
 import { qiRich } from './rich';
 import { TemplateState } from './template';
+import { applyStreams } from './stream-ops';
 
 let cfg: LiveConfig = { ws: '', sub: null, hb: 0 };
 let ws: WebSocket | null = null;
@@ -45,10 +46,23 @@ function clearLoad(): void {
   pending = [];
 }
 
+/**
+ * 组件路由：往上找最近的 [data-target]，把组件 id 放进保留键 __target__。
+ *
+ * 实时组件 渲染时给子树套了一层 `<div data-target="组件id">`，所以组件内部的
+ * 任何事件都自动归它管 —— 页面和组件用同名事件也不会串。
+ * qiSend 这种没有元素的手动上行不带 target，归页面本身。
+ */
+function withTarget(payload: Payload, el: Element | null): Payload {
+  const host = closestFrom(el, 'data-target');
+  if (host) payload.__target__ = attr(host, 'data-target') || '';
+  return payload;
+}
+
 function send(ev: string | null, payload: Payload, el: Element | null): void {
   if (ev && ws && ws.readyState === 1) {
     mark(el);
-    ws.send(JSON.stringify({ event: ev, payload: ident(payload) }));
+    ws.send(JSON.stringify({ event: ev, payload: withTarget(ident(payload), el) }));
   }
 }
 
@@ -81,6 +95,9 @@ function apply(m: Frame): void {
     if (ws) { try { ws.close(); } catch { /* 已关 */ } }
     return;
   }
+  // 流帧：按 data-key 往容器里加/删项，不经过 morph（容器有 data-ignore）。
+  // 可能和内容帧同帧到达，所以不 return，继续往下走。
+  if (m.streams !== undefined) applyStreams(m.streams);
   // 结构化槽位帧：合并变化的下标，用模板计划重渲 —— 走同一套 morph。
   // 拿不到计划（首帧还没到 / 服务端退回了字节 diff）时忽略，等下一帧全量。
   if (m.parts !== undefined) {
@@ -110,7 +127,10 @@ function apply(m: Frame): void {
     }
     clearLoad();
   }
-  if (m.commands !== undefined && m.commands.forEach) { m.commands.forEach(runCmd); clearLoad(); }
+  if (m.commands !== undefined && m.commands.forEach) m.commands.forEach(runCmd);
+  // 收到**任何**一帧都算服务端答复过了 —— 触发事件的元素该退出 qi-loading。
+  // 以前只有内容帧和指令帧清；流帧、空帧不清，按钮就一直灰着。
+  clearLoad();
 }
 
 // ── 连接与重连（指数退避 0.5s → 8s 封顶）──
