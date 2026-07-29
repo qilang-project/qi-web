@@ -78,7 +78,7 @@
         continue;
       }
       if (t.charAt(0) === ">") {
-        out += '<p class="muted">' + qiSpan(t.slice(1).trim()) + "</p>";
+        out += '<p class="qi-muted">' + qiSpan(t.slice(1).trim()) + "</p>";
         i++;
         continue;
       }

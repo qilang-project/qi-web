@@ -1,8 +1,8 @@
 // Qi Web - 聊天界面 —— 开箱即用的 AI 聊天前端（纯 UI，不依赖 Harness）
 //
 // 配合 事件流 的 SSE流式对话 用：服务端一条 `message` 事件流吐 token，
-// 客户端这段 JS 负责气泡、逐字追加、`[调用工具 …]` 标记转成「正在用工具」提示、
-// `[完成]` 收尾。任何 app 一行 聊天界面(...) 就有完整聊天页，不用再抄 EventSource JS。
+// 客户端这段 JS 负责气泡、逐字追加、`[TOOL …]` 标记转成「正在用工具」提示、
+// `[DONE]` 收尾。任何 app 一行 聊天界面(...) 就有完整聊天页，不用再抄 EventSource JS。
 //
 // 用法（服务端）：
 //   函数 聊天页(上下文值: 上下文) : 响应 {
@@ -41,8 +41,8 @@
 }
 
 函数 聊天脚本(流路径: 字符串) : 字符串 {
-    // 单条 message 事件流：含 "[调用工具 X …]" 的片段渲成工具提示并另起气泡；
-    // "[完成]" 收尾；其余逐字追加到当前 AI 气泡。与 事件流.SSE流式对话 完全对接。
+    // 单条 message 事件流：含 "[TOOL X …]" 的片段渲成工具提示并另起气泡；
+    // "[DONE]" 收尾；其余逐字追加到当前 AI 气泡。与 事件流.SSE流式对话 完全对接。
     返回 "<script>(function(){"
         + "var log=document.getElementById('qiclog'),q=document.getElementById('qicq'),send=document.getElementById('qicsend');"
         + "function add(cls,txt){var m=document.createElement('div');m.className='qic-m '+cls;"
@@ -50,14 +50,14 @@
         + "log.appendChild(m);log.scrollTop=log.scrollHeight;return b;}"
         + "function tool(txt){var t=document.createElement('div');t.className='qic-tool';t.textContent=txt;"
         + "log.appendChild(t);log.scrollTop=log.scrollHeight;}"
-        + "function toolMsg(d){var n=(d.match(/\\[调用工具\\s+([a-zA-Z0-9_\\-]+)/)||[])[1]||'';"
+        + "function toolMsg(d){var n=(d.match(/\\[TOOL\\s+([a-zA-Z0-9_\\-]+)/)||[])[1]||'';"
         + "return '🔧 正在用工具 '+n+' …';}"
         + "function ask(){var text=q.value.trim();if(!text)return;add('me',text);q.value='';"
         + "q.disabled=true;send.disabled=true;var bub=add('ai','');var buf='';"
         + "var es=new EventSource('" + 流路径 + "?q='+encodeURIComponent(text));"
         + "es.addEventListener('message',function(e){var d=e.data;"
-        + "if(d==='[完成]'){es.close();q.disabled=false;send.disabled=false;q.focus();return;}"
-        + "if(d.indexOf('[调用工具')>=0){tool(toolMsg(d));bub=add('ai','');buf='';return;}"
+        + "if(d==='[DONE]'){es.close();q.disabled=false;send.disabled=false;q.focus();return;}"
+        + "if(d.indexOf('[TOOL')>=0){tool(toolMsg(d));bub=add('ai','');buf='';return;}"
         + "buf+=d;bub.textContent=buf;log.scrollTop=log.scrollHeight;});"
         + "es.addEventListener('error',function(){es.close();if(!buf&&bub)bub.textContent='（连接中断，稍后再试）';"
         + "q.disabled=false;send.disabled=false;});}"

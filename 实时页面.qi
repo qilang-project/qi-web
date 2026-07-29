@@ -305,17 +305,17 @@
 // 前缀/后缀在 runtime 里算（qi 侧逐字符比对是 O(n²)），返回的字节数已对齐
 // UTF-8 字符边界，不会把中文切成半个字。
 // 中段反而更大时（大改动）就老老实实发全量。
-函数 实时发送增量(ws句柄: 整数, 旧片段: 字符串, 新片段: 字符串) : 整数 {
-    如果 (字符串::字节长度(旧片段) == 0) {
-        返回 实时发送整区(ws句柄, 新片段);
-    }
+// 算增量帧：划得来就返回 {"patch":{p,s,r}} 的 JSON，划不来返回空串（调用方发全量）。
+// 单独拆出来是为了能测 —— 发送要 WS 句柄，纯算不要。
+公开 函数 计算增量帧(旧片段: 字符串, 新片段: 字符串) : 字符串 {
+    如果 (字符串::字节长度(旧片段) == 0) { 返回 ""; }
     变量 前缀: 整数 = 字符串::公共前缀(旧片段, 新片段);
     变量 后缀: 整数 = 字符串::公共后缀(旧片段, 新片段, 前缀);
     变量 新长: 整数 = 字符串::字节长度(新片段);
     变量 中段长: 整数 = 新长 - 前缀 - 后缀;
-    如果 (中段长 < 0) { 返回 实时发送整区(ws句柄, 新片段); }
+    如果 (中段长 < 0) { 返回 ""; }
     // 省不下多少就别绕这一道（留点余量给 patch 帧自身的开销）
-    如果 (中段长 + 64 >= 新长) { 返回 实时发送整区(ws句柄, 新片段); }
+    如果 (中段长 + 64 >= 新长) { 返回 ""; }
 
     变量 中段: 字符串 = 字符串::子串(新片段, 前缀, 中段长);
     变量 帧对象: 整数 = J.创建对象();
@@ -326,6 +326,14 @@
     J.设置对象(帧对象, "patch", 补丁);
     变量 帧文本: 字符串 = J.转字符串(帧对象);
     J.删除(帧对象);
+    返回 帧文本;
+}
+
+函数 实时发送增量(ws句柄: 整数, 旧片段: 字符串, 新片段: 字符串) : 整数 {
+    变量 帧文本: 字符串 = 计算增量帧(旧片段, 新片段);
+    如果 (字符串::字节长度(帧文本) == 0) {
+        返回 实时发送整区(ws句柄, 新片段);
+    }
     返回 WS::发送文本(ws句柄, 帧文本);
 }
 
@@ -417,11 +425,46 @@
     变量 页: 字符串 = "<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n";
     页 = 页 + "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n";
     页 = 页 + "<title>" + 转义HTML(标题) + "</title>\n";
+    页 = 页 + 样式标签();
     页 = 页 + "</head>\n<body>\n";
     页 = 页 + "<div id=\"qi-live\">" + 初始片段 + "</div>\n";
     页 = 页 + 实时运行时脚本(WS路径);
     页 = 页 + "\n</body>\n</html>\n";
     返回 页;
+}
+
+// ── 样式 ────────────────────────────────────────────────────────
+//
+// qiui.css 内联成 <style>：设计令牌 + 基础元素 + 组件类。内联而不是外链，
+// 是为了保住单个二进制部署；想要可缓存的外链就用 挂载资产() 发
+// qi-web/assets/qiui.css。
+//
+// 基础元素直接有样式，模板里写裸 <button> <input> <h1> 就行；组件类是
+// .qi-bar .qi-card .qi-row .qi-grid .qi-badge .qi-muted .qi-empty .qi-track/.qi-fill
+// .qi-item .qi-drag/.qi-drop .qi-pre；按钮变体 .ghost .quiet .danger .icon .block。
+公开 函数 样式标签() : 字符串 {
+    返回 "<style>" + 样式源() + "</style>\n";
+}
+
+// 普通页（登录页、设置页这种没有 WS 的）也想用需要客户端配合的控件时用这个：
+// 发同一份运行时，但不带 window.QI_LIVE 配置，于是它只挂确认框和 .qdd 下拉，
+// 不去连 WebSocket。实时页用 实时运行时构建() 即可，那份已经包含这些。
+公开 函数 组件脚本() : 字符串 {
+    返回 "<script>" + 运行时脚本源() + "</script>\n";
+}
+
+// 主题覆盖：只写要改的令牌就行，放在 样式标签() 之后。
+//
+//   主题("--qi-accent:#10b981;--qi-accent-hover:#059669;--qi-width:720px")
+//
+// 可改的令牌（完整列表见 qi-web/前端/src/qiui.css 开头）：
+//   主色 --qi-accent / --qi-accent-hover / --qi-accent-soft / --qi-accent-ink
+//   中性 --qi-bg / --qi-surface / --qi-ink / --qi-ink-soft / --qi-ink-faint
+//        --qi-muted / --qi-line / --qi-line-strong / --qi-hover
+//   语义 --qi-danger / --qi-danger-soft / --qi-ok / --qi-ok-soft
+//   形状 --qi-radius / --qi-radius-sm / --qi-shadow / --qi-width / --qi-pad / --qi-gap
+公开 函数 主题(令牌: 字符串) : 字符串 {
+    返回 "<style>:root{" + 令牌 + "}</style>\n";
 }
 
 // 每连接独立状态模式的运行时（无订阅帧、无心跳）
@@ -443,232 +486,17 @@
 // - 断线指数退避重连（0.5s→8s），body.qi-offline + qi:连接/qi:断线 事件
 // - 触发元素等待回帧期间带 class qi-loading
 公开 函数 实时运行时构建(ws路径: 字符串, 订阅载荷JSON: 字符串, 心跳毫秒: 整数) : 字符串 {
-    变量 s: 字符串 = "<script>\n(function(){\n";
-    s = s + "var wsPath='" + ws路径 + "';\n";
-    如果 (字符串::字节长度(订阅载荷JSON) > 0) {
-        s = s + "var sub=" + 订阅载荷JSON + ";\n";
-    } 否则 {
-    s = s + `var sub=null;
-`;
-    }
-    s = s + "var hb=" + 整数转字符串(心跳毫秒) + ";\n";
-    s = s + `var ws=null,hbTimer=null,delay=500,pending=[];
-`;
-    // ── 上行 ──
-    s = s + "function ident(p){p=p||{};if(sub){if(sub['token']!==undefined)p['token']=sub['token'];";
-    s = s + "if(sub['昵称']!==undefined)p['昵称']=sub['昵称'];";
-    s = s + `if(sub['成员id']!==undefined)p['成员id']=sub['成员id'];}return p;}
-`;
-    // ── 绑定属性：中英双写 ──
-    // HTML 属性名用中文虽然合法，但 CSS 选择器 / devtools / 第三方工具都别扭，
-    // 所以每个绑定都认英文别名。同一元素两种都写时以中文为准。
-    s = s + `function attr(el,name){return el&&el.getAttribute?el.getAttribute(name):null;}
-function hasAttr(el,name){return !!el&&!!el.hasAttribute&&el.hasAttribute(name);}
-function closestFrom(t,name){return t&&t.closest?t.closest('['+name+']'):null;}
-function vals(el){var p={},i,a;if(!el||!el.attributes)return p;
-  for(i=0;i<el.attributes.length;i++){a=el.attributes[i];
-    if(a.name.indexOf('data-value-')===0){p[a.name.slice(11)]=a.value;}}
-  return p;}
-function mark(el){if(el&&el.classList){el.classList.add('qi-loading');pending.push(el);}}
-function clearLoad(){for(var i=0;i<pending.length;i++){try{pending[i].classList.remove('qi-loading');}catch(e){}}pending=[];}
-`;
-    s = s + "function send(ev,payload,el){if(ws&&ws.readyState===1){mark(el);";
-    s = s + `ws.send(JSON.stringify({'event':ev,'payload':ident(payload)}));}}
-`;
-    s = s + "function sendRaw(ev,payload){if(ws&&ws.readyState===1){";
-    s = s + `ws.send(JSON.stringify({'event':ev,'payload':payload||{}}));}}
-`;
-    // ── morph：新旧 DOM 树逐节点对齐，只动差异 ──
-    s = s + `function nkey(n){return n.nodeType===1?attr(n,'data-key'):null;}
-function same(a,b){return a.nodeType===b.nodeType&&(a.nodeType!==1||a.tagName===b.tagName);}
-function syncAttrs(f,t){
-  var i,a;
-  for(i=f.attributes.length-1;i>=0;i--){a=f.attributes[i].name;
-    if(!t.hasAttribute(a)){f.removeAttribute(a);}}
-  for(i=0;i<t.attributes.length;i++){a=t.attributes[i];
-    if(f.getAttribute(a.name)!==a.value){f.setAttribute(a.name,a.value);}}
-`;
-    // 表单控件的活值：非焦点元素跟随服务端；焦点元素不动（保住正在输入的值）
-    s = s + `  var g=f.tagName;
-  if((g==='INPUT'||g==='TEXTAREA'||g==='SELECT')&&f!==document.activeElement){
-    if(g==='INPUT'&&(f.type==='checkbox'||f.type==='radio')){f.checked=t.hasAttribute('checked');}
-    else if(t.value!==undefined&&f.value!==t.value){f.value=t.value;}}
-}
-function morph(f,t){
-  if(!same(f,t)){f.parentNode.replaceChild(t.cloneNode(true),f);return;}
-  if(f.nodeType===3||f.nodeType===8){if(f.nodeValue!==t.nodeValue){f.nodeValue=t.nodeValue;}return;}
-  if(f.nodeType!==1){return;}
-  syncAttrs(f,t);
-  if(hasAttr(f,'data-ignore')){return;}
-  morphKids(f,t);
-}
-`;
-    // 跨容器认领：本容器里没有这个 key，就去整个 #qi-live 里找。
-    // 看板把卡片从「待办」拖到「完成」就是换了父容器 —— 只在兄弟里找的话
-    // 必然新建节点，焦点/CSS 过渡/拖拽态全丢。先认领再 morph 就能保住身份。
-    // 每帧开始先把 #qi-live 里所有带 key 的节点存进索引。必须先存：morph 是
-    // 按容器顺序走的，源容器（拖出的那栏）会先把节点**删掉**，等轮到目标容器
-    // 再找就没了。存了引用，即使已从文档摘下也能认领回来重新插入。
-    s = s + `var keyIndex=null;
-function buildKeyIndex(){
-  keyIndex={};var live=document.getElementById('qi-live');if(!live)return;
-  var all=live.querySelectorAll('*'),i,k;
-  for(i=0;i<all.length;i++){k=nkey(all[i]);if(k&&!keyIndex[k]){keyIndex[k]=all[i];}}
-}
-function claimByKey(k){
-  if(!k||!keyIndex)return null;var n=keyIndex[k];if(!n)return null;
-  delete keyIndex[k];return n;
-}
-function morphKids(f,t){
-  var byKey={},n,k;
-  for(n=f.firstChild;n;n=n.nextSibling){k=nkey(n);if(k){byKey[k]=n;}}
-  var cur=f.firstChild,tn=t.firstChild;
-  while(tn){
-    var nxt=tn.nextSibling,tk=nkey(tn),m=tk?byKey[tk]:null;
-`;
-    // 本容器没有 → 全局按 key 认领（可能刚从别的容器搬过来）
-    s = s + `    if(!m&&tk){var g=claimByKey(tk);if(g&&g!==f&&!f.contains(g)&&!g.contains(f)){m=g;}}
-    if(m){if(m===cur){cur=cur.nextSibling;}else{f.insertBefore(m,cur);}morph(m,tn);}
-    else if(cur&&same(cur,tn)&&!nkey(cur)){var c=cur;cur=cur.nextSibling;morph(c,tn);}
-    else{f.insertBefore(tn.cloneNode(true),cur);}
-    tn=nxt;
-  }
-  while(cur){var d=cur;cur=cur.nextSibling;f.removeChild(d);}
-}
-`;
-    // ── 下行帧处理：html → morph；指令 → 逐条执行 ──
-    s = s + `function runCmd(c){if(!c||!c['type']){return;}var t=c['type'];
-  if(t==='navigate'){location.href=c['target'];}
-  else if(t==='title'){document.title=c['text'];}
-  else if(t==='scroll'){var el=document.querySelector(c['target']);
-    if(el){try{el.scrollIntoView({behavior:'smooth',block:'end'});}catch(e){el.scrollIntoView();}}}
-  else if(t==='event'){var d=null;try{d=JSON.parse(c['payloadText']||'null');}catch(e){}
-    try{window.dispatchEvent(new CustomEvent('qi:'+c['name'],{detail:d}));}catch(e2){}
-    if(c['name']==='resourceToast'&&d){var n=document.createElement('div'),ok=d['type']==='success';
-      n.textContent=d['消息']||'';n.style.cssText='position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:100001;padding:11px 18px;border:2px solid #1e3a4c;border-radius:12px;background:'+(ok?'#eaf7ee':'#fff0eb')+';color:#1e3a4c;font-weight:700;box-shadow:4px 4px 0 #1e3a4c';document.body.appendChild(n);setTimeout(function(){n.remove();},2400);}}
-}
-var lastHtml='';
-`;
-    s = s + "(function(){var st=document.createElement('style');st.textContent="
-        + "'.qi-denied{padding:16px 18px;background:#fef2f2;border:1.5px solid #fecaca;"
-        + "border-radius:12px;color:#b91c1c;font-size:15px;line-height:1.6}';"
-        + "document.head.appendChild(st);})();\n";
-    s = s + `var denied=false;
-function apply(m){
-  if(m.denied!==undefined){denied=true;
-    var live=document.getElementById('qi-live');
-    if(live){live.innerHTML='<p class="qi-denied">'+m.denied+'</p>';}
-    try{window.dispatchEvent(new CustomEvent('qi:denied',{detail:m.denied}));}catch(e){}
-    if(ws){try{ws.close();}catch(e){}}return;}
-`;
-    // 增量帧：用上一帧 + 前缀/后缀/中段 拼回完整 HTML，再走同一套 morph
-    s = s + `  if(m.patch!==undefined&&lastHtml){var pt=m.patch;
-    var b=new TextEncoder().encode(lastHtml);
-    var dec=new TextDecoder();
-    m={html:dec.decode(b.slice(0,pt.p))+pt.r+dec.decode(b.slice(b.length-pt.s))};}
-  if(m.html!==undefined){var live=document.getElementById('qi-live');
-    lastHtml=m.html;
-    buildKeyIndex();
-    if(live){var box=document.createElement('div');box.innerHTML=m.html;morphKids(live,box);}
-    clearLoad();}
-  if(m['commands']!==undefined&&m['commands'].forEach){m['commands'].forEach(runCmd);clearLoad();}
-}
-`;
-    // ── 连接与重连（指数退避）──
-    s = s + `function connect(){
-  var proto=location.protocol==='https:'?'wss://':'ws://';
-  ws=new WebSocket(proto+location.host+wsPath);
-  ws.onopen=function(){delay=500;
-    document.body.classList.remove('qi-offline');
-    try{window.dispatchEvent(new CustomEvent('qi:online'));}catch(e){}
-    if(sub){sendRaw('__订阅__',sub);}
-    if(hbTimer){clearInterval(hbTimer);}
-    if(sub&&hb>0){hbTimer=setInterval(function(){sendRaw('__心跳__',{});},hb);}
-  };
-  ws.onmessage=function(e){var m;try{m=JSON.parse(e.data);}catch(err){return;}apply(m);};
-  ws.onclose=function(){if(hbTimer){clearInterval(hbTimer);}
-    if(denied){return;}
-    document.body.classList.add('qi-offline');
-    try{window.dispatchEvent(new CustomEvent('qi:offline'));}catch(e){}
-    setTimeout(connect,delay);delay=Math.min(delay*2,8000);};
-}
-`;
-    // ── 自定义确认模态框（替代浏览器原生 confirm）──
-    s = s + "(function(){var st=document.createElement('style');st.textContent="
-        + "'#qi-modal{position:fixed;inset:0;z-index:100000;display:none;align-items:center;justify-content:center;background:rgba(15,23,42,.45);backdrop-filter:blur(2px);padding:20px}'"
-        + "+'#qi-modal .qi-modal-card{background:#fff;border:2.5px solid #1e3a4c;border-radius:18px;box-shadow:0 18px 50px rgba(0,0,0,.25);max-width:380px;width:100%;padding:22px 24px;animation:qiPop .16s ease-out}'"
-        + "+'@keyframes qiPop{from{transform:scale(.92);opacity:0}to{transform:scale(1);opacity:1}}'"
-        + "+'#qi-modal .qi-modal-title{font-size:17px;font-weight:800;color:#1e3a4c;margin:0 0 8px}'"
-        + "+'#qi-modal .qi-modal-msg{font-size:15px;line-height:1.65;color:#334155;margin:0 0 20px;white-space:pre-wrap}'"
-        + "+'#qi-modal .qi-modal-btns{display:flex;justify-content:flex-end;gap:10px}'"
-        + "+'#qi-modal button{padding:9px 20px;border-radius:11px;font-size:14px;font-weight:700;cursor:pointer;border:2px solid transparent}'"
-        + "+'#qi-modal .qi-modal-cancel{background:#fff;border-color:#cbd5e1;color:#475569}'"
-        + "+'#qi-modal .qi-modal-cancel:hover{background:#f1f5f9}'"
-        + "+'#qi-modal .qi-modal-ok{background:#3fa65c;color:#fff}'"
-        + "+'#qi-modal .qi-modal-ok:hover{background:#348a4d}';document.head.appendChild(st);})();\n";
-    s = s + `function qiConfirm(msg,onOk){
-  var ov=document.getElementById('qi-modal');
-  if(!ov){ov=document.createElement('div');ov.id='qi-modal';
-    ov.innerHTML='<div class="qi-modal-card"><div class="qi-modal-title">请确认</div><div class="qi-modal-msg"></div><div class="qi-modal-btns"><button type="button" class="qi-modal-cancel">取消</button><button type="button" class="qi-modal-ok">确定</button></div></div>';
-    document.body.appendChild(ov);}
-  ov.querySelector('.qi-modal-msg').textContent=msg;
-  var ok=ov.querySelector('.qi-modal-ok'),cancel=ov.querySelector('.qi-modal-cancel');
-  function close(){ov.style.display='none';document.removeEventListener('keydown',onKey);}
-  function onKey(e){if(e.key==='Escape'){close();}else if(e.key==='Enter'){close();if(onOk)onOk();}}
-  ok.onclick=function(){close();if(onOk)onOk();};
-  cancel.onclick=close;
-  ov.onclick=function(e){if(e.target===ov)close();};
-  document.addEventListener('keydown',onKey);
-  ov.style.display='flex';setTimeout(function(){ok.focus();},0);
-}
-window.qiConfirm=qiConfirm;
-`;
-    // 应用侧主动上行：声明式绑定只覆盖 click/input/keyup/submit，
-    // 拖拽、画布、快捷键这类自定义交互需要自己发事件。
-    //   window.qiSend("移动", {卡片id: 3, 目标栏: "doing"})
-    // 身份字段（token/昵称/成员id）会像声明式绑定一样自动并进载荷。
-    s = s + `window.qiSend=function(ev,payload){send(ev,payload||{},null);};
-`;
-    // ── 事件委托绑定 ──
-    s = s + `document.addEventListener('click',function(e){
-  var el=closestFrom(e.target,'data-click');
-  if(el){var ev=attr(el,'data-click'),cf=attr(el,'data-confirm');
-    if(cf){qiConfirm(cf,function(){send(ev,vals(el),el);});return;}
-    send(ev,vals(el),el);}
-});
-document.addEventListener('input',function(e){
-  var el=closestFrom(e.target,'data-input');
-  if(!el){return;}
-  var ev=attr(el,'data-input');
-  var p=vals(el);p.value=el.value;
-  var ms=parseInt(attr(el,'data-debounce')||'0',10);
-  if(ms>0){if(el.__qiT){clearTimeout(el.__qiT);}
-    el.__qiT=setTimeout(function(){send(ev,p,el);},ms);}
-  else{send(ev,p,el);}
-});
-document.addEventListener('keyup',function(e){
-  var el=closestFrom(e.target,'data-keyup');
-  if(!el){return;}
-  var f2=attr(el,'data-key-filter');
-  if(f2&&f2!==e.key){return;}
-  var p=vals(el);p.key=e.key;if(el.value!==undefined){p.value=el.value;}
-  send(attr(el,'data-keyup'),p,el);
-  if(hasAttr(el,'data-clear-on-key')){el.value='';}
-});
-function qiDoSubmit(f4){var d=vals(f4);
-  new FormData(f4).forEach(function(v,k){d[k]=v;});
-  send(attr(f4,'data-submit'),d,f4);
-  if(sub){f4.reset();}}
-document.addEventListener('submit',function(e){
-  var f4=closestFrom(e.target,'data-submit');
-  if(f4){e.preventDefault();
-    var cf=attr(f4,'data-confirm');
-    if(cf){qiConfirm(cf,function(){qiDoSubmit(f4);});return;}
-    qiDoSubmit(f4);}
-});
-connect();
-`;
-    s = s + "})();\n</script>";
+    // 运行时本体是 TS 写的（qi-web/前端/src/*.ts），构建产物在 前端资产.qi。
+    // 这里只发一小段配置，本体从常量取 —— 单个二进制部署，页面不依赖外部 .js。
+    变量 载荷: 字符串 = 订阅载荷JSON;
+    如果 (字符串::字节长度(载荷) == 0) { 载荷 = "null"; }
+    // qiLiveStart 那句管的是「布局层已经先发过一份运行时」的情况（普通页也要
+    // 下拉/确认框，见 组件脚本()）：那时运行时已经跑完了，读不到后来的 QI_LIVE，
+    // 得主动喊一嗓子。运行时还没来就是个 undefined，跳过，由它自己读 QI_LIVE 启动。
+    变量 s: 字符串 = "<script>window.QI_LIVE={ws:\"" + ws路径 + "\",sub:" + 载荷
+        + ",hb:" + 整数转字符串(心跳毫秒) + "};"
+        + "if(window.qiLiveStart)window.qiLiveStart(window.QI_LIVE);</script>\n";
+    s = s + "<script>" + 运行时脚本源() + "</script>";
     返回 s;
 }
 

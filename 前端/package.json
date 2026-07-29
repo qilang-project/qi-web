@@ -1,0 +1,16 @@
+{
+  "name": "qi-web-frontend",
+  "private": true,
+  "description": "qi-web 客户端运行时。源码 TS，产物签入 assets/ —— 用 qi-web 的人不需要 node，只有改运行时的人需要。",
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.10",
+    "esbuild": "^0.25.0",
+    "jsdom": "^30.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.10"
+  }
+}

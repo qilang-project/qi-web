@@ -1,0 +1,221 @@
+/* 运行时自带样式 —— 打包进 JS，由 injectStyle() 注入。
+ *
+ * 这里只放「运行时自己造出来的 DOM」：确认框、拒绝提示、连接状态。应用没引
+ * qiui.css 时也得能看，所以每个 var() 都带兜底值；引了就自动跟着主题走。 */
+
+#qi-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(2px);
+  padding: 20px;
+}
+#qi-modal .qi-modal-card {
+  background: var(--qi-surface, #fff);
+  border: 1.5px solid var(--qi-line, #e5e7eb);
+  border-radius: var(--qi-radius, 14px);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.25);
+  max-width: 380px;
+  width: 100%;
+  padding: 22px 24px;
+  animation: qi-pop 0.16s ease-out;
+}
+@keyframes qi-pop {
+  from {
+    transform: scale(0.92);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+#qi-modal .qi-modal-title {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--qi-ink, #1f2937);
+  margin: 0 0 8px;
+}
+#qi-modal .qi-modal-msg {
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--qi-ink-soft, #4b5563);
+  margin: 0 0 20px;
+  white-space: pre-wrap;
+}
+#qi-modal .qi-modal-btns {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+#qi-modal button {
+  padding: 9px 20px;
+  border-radius: var(--qi-radius-sm, 9px);
+  font-size: 14px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  border: 1.5px solid transparent;
+}
+#qi-modal .qi-modal-cancel {
+  background: var(--qi-surface, #fff);
+  border-color: var(--qi-line, #d1d5db);
+  color: var(--qi-ink-soft, #4b5563);
+}
+#qi-modal .qi-modal-cancel:hover {
+  background: var(--qi-bg, #f3f4f6);
+}
+#qi-modal .qi-modal-ok {
+  background: var(--qi-accent, #6366f1);
+  color: #fff;
+}
+#qi-modal .qi-modal-ok:hover {
+  background: var(--qi-accent-hover, #4f46e5);
+}
+
+/* 服务端拒绝这次事件时替换掉页面内容（准入失败、越权等） */
+.qi-denied {
+  padding: 16px 18px;
+  background: var(--qi-danger-soft, #fef2f2);
+  border: 1.5px solid var(--qi-danger-line, #fecaca);
+  border-radius: var(--qi-radius, 14px);
+  color: var(--qi-danger, #b91c1c);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+/* ── 富渲染块（window.qiRich 的产物）────────────────────────────────
+   表格 / 键值 / 列表 / 卡片 / 骨架。颜色走 --qi-* 令牌，跟应用主题一致。 */
+.rqc-tbl {
+  width: 100%;
+  margin: 0.4em 0;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.rqc-tbl th,
+.rqc-tbl td {
+  padding: 6px 10px;
+  border: 1px solid var(--qi-line, #e2e8f0);
+  text-align: left;
+}
+.rqc-tbl th {
+  background: var(--qi-hover, #f8fafc);
+}
+.rqc-kv {
+  margin: 0.3em 0;
+}
+.rqc-kvr {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 5px 0;
+  border-bottom: 1px dashed var(--qi-line, #e2e8f0);
+}
+.rqc-kvk {
+  color: var(--qi-muted, #64748b);
+}
+.rqc-list {
+  margin: 0.3em 0;
+  padding-left: 1.3em;
+}
+.rqc-card {
+  margin: 0.5em 0;
+  padding: 14px;
+  background: var(--qi-accent-soft, #fff7ed);
+  border: 2px solid var(--qi-accent, #ff6b4a);
+  border-radius: 12px;
+}
+.rqc-ct {
+  margin-bottom: 8px;
+  font-weight: 700;
+}
+.rqc-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.rqc-abtn {
+  padding: 8px 16px;
+  background: var(--qi-accent, #ff6b4a);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.rqc-abtn:disabled {
+  opacity: 0.6;
+}
+.rqc-actres {
+  margin-top: 8px;
+  color: var(--qi-ok, #16a34a);
+  font-size: 14px;
+  font-weight: 700;
+}
+.rqc-skel {
+  padding: 8px 0;
+  color: var(--qi-ink-faint, #94a3b8);
+  font-size: 13px;
+  font-style: italic;
+}
+.rqc-pre {
+  padding: 12px;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 8px;
+  overflow: auto;
+  font-size: 13px;
+}
+/* 工具调用提示 + 流式光标 */
+.rqc-tool {
+  align-self: center;
+  color: var(--qi-ink-faint, #94a3b8);
+  font-size: 13px;
+  font-style: italic;
+}
+.rqc-cur {
+  display: inline-block;
+  width: 8px;
+  height: 15px;
+  background: var(--qi-accent, #ff6b4a);
+  animation: qi-blink 1s step-end infinite;
+}
+@keyframes qi-blink {
+  50% { opacity: 0; }
+}
+
+/* 事件已发出、服务端还没回帧：把触发的那个控件压淡一点当 pending 提示。
+   这个 class 挂在控件自己身上，不是 body。 */
+.qi-loading {
+  opacity: 0.55;
+  transition: opacity 0.1s;
+}
+
+/* 断线：整页压暗禁点 + 底部提示条（class 挂在 body 上）。
+   提示文案覆盖： body.qi-offline::after{content:"…"} */
+.qi-offline #qi-live {
+  opacity: 0.45;
+  filter: grayscale(0.6);
+  pointer-events: none;
+}
+.qi-offline::after {
+  content: "连接已断开，正在重连…";
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 99999;
+  background: var(--qi-ink, #1f2937);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 16px;
+  border-radius: 999px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}

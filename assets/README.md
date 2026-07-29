@@ -1,71 +1,109 @@
-# qiui — client widgets for qi-web
+# qi-web static assets
 
-Two zero-dependency, no-build browser widgets that ship with the qi-web
-framework as static assets. Drop them in a `<link>` / `<script>` tag and go.
+Three files. All of them are **build products checked into the repo** — you don't
+need node to use qi-web, only to change them.
 
-- **`qiui.css`** — styles for both widgets (theme via CSS custom properties).
-- **`qiui.js`** — plain browser JS (IIFE, exposes a global `qiui`).
+| File | Source | What it is |
+| --- | --- | --- |
+| `qiui-core.js` | `qi-web/前端/src/*.ts` | LiveView client runtime: WS connect/reconnect, declarative bindings, DOM morph, confirm modal |
+| `qiui.css` | `qi-web/前端/src/qiui.css` | App stylesheet: design tokens + base elements + component classes |
+| `qiui.js` | hand-written, no build | Optional standalone widgets: `.qdd` dropdown + `qiui.markdown()` |
 
-## The widgets
+Rebuild the first two with:
 
-### 1. Custom dropdown (`.qdd`)
+```bash
+cd qi-web/前端 && npm install && npm run build
+```
 
-A replacement for the native `<select>`. The native option popup detaches to the
-bottom of the screen on mobile (and can't be repositioned with CSS); this one
-opens glued right below the box. A hidden `<input>` carries the selected value,
-so normal form submission / `FormData` collection keeps working. All clicks are
-**event-delegated on `document`**, so the widget survives DOM morph / re-render
-(e.g. live-reload) with no re-binding.
+That also regenerates `qi-web/前端资产.qi`, which embeds both as qi string
+constants so an app still deploys as a single binary.
 
-### 2. Markdown renderer (`qiui.markdown`)
+## Using them from qi
 
-`qiui.markdown(text)` returns an HTML string. It escapes first, then applies the
-markdown rules, and blocks `javascript:` / `data:` link protocols. Fast enough to
-re-render on every streamed token (chat bubbles).
+The usual way — inline, no extra requests, single-binary deploy stays intact:
 
-Supported markdown:
+```qi
+导入 Web::{样式标签, 主题, 实时运行时构建};
 
-- Headings `#`, `##`, `###`
-- Bold `**x**`, italic `*x*`, inline code `` `x` ``
-- Links `[text](url)` (opens in new tab; unsafe protocols rendered as plain text)
-- Unordered lists (`- ` / `* `) and ordered lists (`1. `)
-- Blockquotes (`> `) → `<p class="muted">`
-- Pipe tables (`| a | b |`; the first row is the header, separator rows ignored)
-- Tool-call lines `[调用工具 name {…}]` → a `.qi-tool` pill (JSON args hidden)
-- Blank lines separate blocks; anything else becomes a `<p>`
+h = h + 样式标签();                        // <style>…qiui.css…</style>
+h = h + 主题("--qi-accent:#10b981");       // 只覆盖要改的令牌
+…
+页 = 页 + 实时运行时构建("/ws", 订阅载荷, 30000);   // 运行时 JS
+```
 
-## Including them
-
-Serve this `assets/` directory as static files, then link the two files.
-
-In your qi-web app:
+The cacheable way — serve this directory and link the files (better for
+multi-page apps, where the same 8 KB would otherwise be inlined on every page):
 
 ```qi
 app = 静态目录(app, "/static", "qi-web/assets");
 ```
 
-In your HTML `<head>` / before `</body>`:
-
 ```html
 <link rel="stylesheet" href="/static/qiui.css">
-<script src="/static/qiui.js"></script>
+<script src="/static/qiui-core.js"></script>
 ```
 
-## JS API
+## qiui.css
 
-| Call | Returns | Notes |
-| --- | --- | --- |
-| `qiui.markdown(text)` | HTML string | Safe markdown → HTML. |
-| `qiui.initDropdowns(root)` | `undefined` | (Re)sync `.qdd` widgets inside `root` (default `document`): marks the option matching the hidden input value as selected and fills the head label. Idempotent; safe to call after injecting new markup. Interaction itself is delegated, so you rarely need this. |
-| `window.qiMarkdown(text)` | HTML string | Alias of `qiui.markdown` for drop-in compatibility. |
+Three layers, take what you need:
 
-Dropdowns auto-initialize on `DOMContentLoaded`; the delegated click handler is
-also bound immediately at script load.
+1. **Design tokens** — the `--qi-*` custom properties on `:root`. Retheme by
+   overriding these and nothing else.
+2. **Base elements** — `body`, `h1`–`h3`, `input`, `textarea`, `button`, `a` are
+   styled directly, so templates can use bare tags.
+3. **Component classes** —
 
-## Dropdown HTML markup contract
+   | Class | Use |
+   | --- | --- |
+   | `.qi-bar` | top bar (identity left, actions right) |
+   | `.qi-card` | page-width centered card |
+   | `.qi-panel` | same look, no width/centering — for grid cells and sidebars |
+   | `.qi-row` / `.qi-stack` / `.qi-between` | flex layouts; `.qi-row > input` grows |
+   | `.qi-grid` (`.cols-3`, `.cols-4`) | responsive grid, collapses to one column under 760px |
+   | `.qi-muted` / `.qi-faint` | secondary / tertiary text |
+   | `.qi-badge` (`.plain`, `.solid`, `.ok`) | pill label |
+   | `.qi-num` | tabular figures, so changing numbers don't shift layout |
+   | `.qi-track` + `.qi-fill` | progress bar |
+   | `.qi-empty` | empty-list placeholder |
+   | `.qi-item` | one row inside a card |
+   | `.qi-drag` / `.qi-drop` (`.over`) | drag-and-drop board pieces |
+   | `.qi-pre` (`.box`) | preserved line breaks / debug output |
 
-Produce exactly this structure (the hidden `<input name="…">` is what carries the
-submitted value):
+   Button variants: `.ghost` `.quiet` `.danger` `.icon` `.block`.
+
+The runtime's own classes (`#qi-modal`, `.qi-denied`, `.qi-loading`,
+`.qi-offline`) are styled from inside `qiui-core.js`, so the confirm modal and
+the offline banner look right even if you never include `qiui.css`. They read the
+same `--qi-*` tokens, so they follow your theme when you do.
+
+### Theming
+
+```qi
+h = h + 主题("--qi-accent:#10b981;--qi-accent-hover:#059669;"
+    + "--qi-accent-soft:#ecfdf5;--qi-accent-ink:#059669;--qi-width:720px");
+```
+
+Full token list is at the top of `qi-web/前端/src/qiui.css`.
+
+### Using Tailwind instead
+
+Nothing here blocks it — every custom property and class name is `qi-`-prefixed.
+Tailwind isn't the framework default because it needs a per-app content-scanning
+build, which would put a node toolchain in front of every qi-web app. If you want
+it, add it in your own app and either drop `样式标签()` or keep it for the base
+element styles.
+
+## qiui.js (optional, standalone)
+
+Not part of the LiveView runtime — include it only if you want these two:
+
+### Custom dropdown (`.qdd`)
+
+Replaces the native `<select>`, whose option popup detaches to the bottom of the
+screen on mobile and can't be repositioned with CSS. This one opens glued below
+the box. A hidden `<input>` carries the value, so normal form submission and
+`FormData` keep working. Clicks are delegated on `document`, so it survives DOM
+morph with no re-binding.
 
 ```html
 <div class="qdd">
@@ -75,73 +113,30 @@ submitted value):
   </div>
   <input type="hidden" name="FIELD_NAME" value="CURRENT_VALUE">
   <div class="qdd-menu">
-    <div class="qdd-opt" data-v="VALUE_1">Label 1</div>
+    <div class="qdd-opt sel" data-v="VALUE_1">Label 1</div>
     <div class="qdd-opt" data-v="VALUE_2">Label 2</div>
-    <div class="qdd-opt" data-v="VALUE_3">Label 3</div>
   </div>
 </div>
 ```
 
-Contract details:
+- `input[type=hidden]` is **required**; its `value` is updated on selection and a
+  `change` event is dispatched on it.
+- `data-v` on each `.qdd-opt` is the value written to the hidden input; the
+  element's text is copied into `.qdd-txt`. The chosen one gets `.sel`.
 
-- Root `.qdd` — one dropdown.
-- `.qdd-head` `>` `.qdd-txt` — the visible current label; `.qdd-ar` — the arrow.
-- `input[type=hidden]` — **required**; its `name` is the form field, its `value`
-  is updated on selection (a `change` event is dispatched on it).
-- `.qdd-menu` `>` `.qdd-opt[data-v]` — one option each; `data-v` is the value that
-  gets written to the hidden input, the element text is copied into `.qdd-txt`.
-- The selected option gets a `.sel` class.
+### Markdown renderer
 
-### Minimal copy-paste example
+`qiui.markdown(text)` returns an HTML string — escapes first, then applies the
+rules, and blocks `javascript:` / `data:` link protocols. Fast enough to re-render
+on every streamed token. Wrap the output in `class="md"` for styling.
 
-```html
-<!doctype html>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="stylesheet" href="/static/qiui.css">
+Supported: headings `#`–`###`; `**bold**`, `*italic*`, `` `code` ``; links
+`[text](url)`; `- `/`* ` and `1. ` lists; `> ` blockquotes → `.qi-muted`; pipe tables;
+tool-call lines `[调用工具 name {…}]` → a `.qi-tool` pill; blank lines separate
+blocks, everything else becomes a `<p>`.
 
-<form method="post" action="/save">
-  <div class="qdd">
-    <div class="qdd-head">
-      <span class="qdd-txt">🍎 Apple</span>
-      <span class="qdd-ar">▾</span>
-    </div>
-    <input type="hidden" name="fruit" value="apple">
-    <div class="qdd-menu">
-      <div class="qdd-opt sel" data-v="apple">🍎 Apple</div>
-      <div class="qdd-opt" data-v="pear">🍐 Pear</div>
-      <div class="qdd-opt" data-v="peach">🍑 Peach</div>
-    </div>
-  </div>
-  <button type="submit">Save</button>
-</form>
-
-<script src="/static/qiui.js"></script>
-```
-
-Rendering markdown:
-
-```html
-<div class="md" id="out"></div>
-<script>
-  document.getElementById("out").innerHTML =
-    qiui.markdown("# Hi\n\n- **bold** and `code`\n- [link](https://example.com)");
-</script>
-```
-
-## Theming
-
-Override the CSS custom properties (all have neutral fallbacks):
-
-```css
-:root {
-  --qiui-accent: #ff6b4a;   /* highlight / active / links */
-  --qiui-text:   #1e3a4c;   /* text + borders */
-  --qiui-bg:     #ffffff;
-  --qiui-hover:  #fff6e9;   /* option hover / selected bg */
-  --qiui-divider:#f2ead9;   /* separators + table borders */
-  --qiui-muted:  #6b7a86;
-  --qiui-shadow: #1e3a4c;   /* hard menu drop-shadow */
-  --qiui-radius: 10px;
-}
-```
+| Call | Returns |
+| --- | --- |
+| `qiui.markdown(text)` | HTML string |
+| `qiui.initDropdowns(root)` | `undefined` — resync `.qdd` widgets after injecting markup (rarely needed; interaction is delegated) |
+| `window.qiMarkdown(text)` | alias of `qiui.markdown` |

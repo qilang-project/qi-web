@@ -1,0 +1,62 @@
+/** 页面里由 qi 侧注入的配置：<script>window.QI_LIVE={ws:"/x/ws",sub:{...},hb:30000}</script> */
+export interface LiveConfig {
+  /** WebSocket 路径 */
+  ws: string;
+  /** 首帧 __订阅__ 的载荷；null = 不发订阅帧（无鉴权页面） */
+  sub: Record<string, unknown> | null;
+  /** 心跳间隔毫秒，0 = 关闭 */
+  hb: number;
+}
+
+/** 下行帧：整区 HTML / 增量补丁 / 浏览器指令 / 准入拒绝 */
+export interface Frame {
+  html?: string;
+  patch?: { p: number; s: number; r: string };
+  commands?: Command[];
+  denied?: string;
+}
+
+export interface Command {
+  type: string;
+  target?: string;
+  text?: string;
+  name?: string;
+  payloadText?: string;
+}
+
+export type Payload = Record<string, unknown>;
+
+/** window.qiStream(opts)：SSE 流式对话，见 stream.ts */
+export interface StreamOpts {
+  /** SSE 地址 */
+  url: string;
+  /** 正文渲染目标（元素或 id） */
+  el: HTMLElement | string;
+  /** 需要自动滚到底的容器（元素或 id） */
+  scroller?: HTMLElement | string;
+  /** 富渲染的动作端点；给了就用 window.qiRich，不给就纯文本 */
+  act?: string;
+  /** 工具调用时的状态文案，{name} 会被替换成工具名 */
+  toolHint?: string;
+  /** 开流瞬间先放的占位 HTML（光标、骨架） */
+  waitingHtml?: string;
+  /** 流结束但一个字都没收到时显示的文案 */
+  doneText?: string;
+  /** 连接出错且正文为空时显示的文案 */
+  errorText?: string;
+}
+
+declare global {
+  interface Window {
+    QI_LIVE?: LiveConfig;
+    qiSend?: (event: string, payload?: Payload) => void;
+    qiConfirm?: (msg: string, onOk: () => void) => void;
+    /** 运行时晚于配置加载时由配置脚本调用；也是第二次注入的防重开关 */
+    qiLiveStart?: (cfg: LiveConfig) => void;
+    __qiuiLoaded?: boolean;
+    /** SSE 流式对话 */
+    qiStream?: (opts: StreamOpts) => EventSource | null;
+    /** 富渲染：markdown + table/list/kv/card 块 + 声明式动作按钮 */
+    qiRich?: (el: HTMLElement, buf: string, act?: string) => void;
+  }
+}
