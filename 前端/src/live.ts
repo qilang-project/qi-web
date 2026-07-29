@@ -234,6 +234,37 @@ function bind(): void {
     if (el.hasAttribute('data-clear-on-key')) el.value = '';
   });
 
+  // 表单级 change（对标 phx-change）：表单里任何一个字段变了，就把**整张表**
+  // 送上去。校验要看全表（两次密码是否一致这种），一个字段一个字段送没法做。
+  //
+  // 默认防抖 200ms —— 不防抖的话每敲一个字符一个来回，输入框里连打字都会卡。
+  const changeTimers = new WeakMap<Element, number>();
+  const sendForm = (f: HTMLFormElement, ev: string, el: Element | null): void => {
+    const d: Payload = vals(f);
+    new FormData(f).forEach((v, k) => { d[k] = v; });
+    send(ev, d, el);
+  };
+  document.addEventListener('input', (e) => {
+    const f = closestFrom(e.target, 'data-change') as HTMLFormElement | null;
+    if (!f) return;
+    const ev = attr(f, 'data-change');
+    if (!ev) return;
+    const ms = parseInt(attr(f, 'data-debounce') || '200', 10);
+    if (ms <= 0) { sendForm(f, ev, e.target as Element); return; }
+    const old = changeTimers.get(f);
+    if (old) clearTimeout(old);
+    changeTimers.set(f, setTimeout(() => sendForm(f, ev, e.target as Element), ms) as unknown as number);
+  });
+  // 下拉、勾选框这些不发 input 只发 change，补一条（不防抖：这类是一次性动作）
+  document.addEventListener('change', (e) => {
+    const t = e.target as Element | null;
+    if (!t || !t.matches || !t.matches('select,[type=checkbox],[type=radio]')) return;
+    const f = closestFrom(t, 'data-change') as HTMLFormElement | null;
+    if (!f) return;
+    const ev = attr(f, 'data-change');
+    if (ev) sendForm(f, ev, t);
+  });
+
   document.addEventListener('submit', (e) => {
     const f = closestFrom(e.target, 'data-submit') as HTMLFormElement | null;
     if (!f) return;

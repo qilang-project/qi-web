@@ -556,6 +556,39 @@ button.icon:hover {
 }
 
 /* ── 7. 移动端 ────────────────────────────────────────────────────────── */
+/* ── 表单字段（表单.qi 的 文本字段 / 密码字段 … 生成的结构）───────────── */
+
+.qi-field {
+  display: block;
+  margin-bottom: var(--qi-gap);
+}
+
+.qi-field-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+  color: var(--qi-ink-soft);
+}
+
+.qi-field .qi-input {
+  width: 100%;
+}
+
+/* 校验没过的字段：边框变红。只在「用户动过之后」才会带上这个类 ——
+   一进页面就红一片是很讨厌的，那个判断在 表单.qi 的 显示用错误 里。 */
+.qi-input.bad,
+.qi-input.bad:focus {
+  border-color: var(--qi-danger);
+  background: var(--qi-danger-soft);
+}
+
+.qi-err {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--qi-danger);
+}
+
 @media (max-width: 640px) {
   :root {
     --qi-pad: 12px;
