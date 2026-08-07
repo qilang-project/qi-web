@@ -1,0 +1,115 @@
+# qi-web 框架级告警规则。任何挂了 Web.指标 的应用都能直接用。
+#
+# 用法（prometheus.yml）：
+#   rule_files:
+#     - /etc/prometheus/qi-web规则.yml
+#   scrape_configs:
+#     - job_name: qi
+#       authorization: { credentials_file: /etc/prometheus/qi.token }
+#       static_configs: [{ targets: ['127.0.0.1:41862'] }]
+#
+# ── 两条不写在这儿的规则，和为什么 ──────────────────────────────
+#
+# 1. **不要对 *_today 这类「当日快照」建告警。** qi-观测 的
+#    qi_observe_pageviews_today / visitors_today 过了午夜会掉回 0 ——
+#    任何「低于 X 就报警」的规则每天早上都会响一次。它们是给看板看的。
+#    要对流量告警，用 rate(qi_observe_pageviews_total[...])，那才是 counter。
+#
+# 2. **「没有流量」这条得自己调。** 小站夜里本来就没人，一律报警等于天天狼来了。
+#    下面给了一条，但默认 severity 是 info 并且窗口开得很大；真要用请配合
+#    业务作息，或者干脆只在白天生效（Alertmanager 的 time_intervals）。
+
+groups:
+  - name: qi-web-可用性
+    rules:
+      # 抓不到了。up 是 Prometheus 自己产生的，跟应用无关 —— 应用挂了、
+      # 端口不通、口令配错（返回 404）都会让它变 0。
+      - alert: Qi应用抓不到
+        expr: up{job=~"qi.*"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.instance }} 抓不到指标"
+          description: >-
+            两分钟没抓到 /metrics。可能是进程挂了、端口不通，
+            也可能是 QI_METRICS_TOKEN 配错了（口令不对返回的是 404，不是 401）。
+
+      # 进程重启。uptime 比五分钟前小 = 中间归零过。
+      # 不用「uptime < 300」——那条在每次部署后都会持续响五分钟。
+      - alert: Qi应用重启了
+        expr: qi_web_uptime_seconds - (qi_web_uptime_seconds offset 5m) < 0
+        labels: { severity: info }
+        annotations:
+          summary: "{{ $labels.instance }} 重启过"
+          description: "计划内部署可以忽略；频繁出现就是在反复崩溃。"
+
+  - name: qi-web-错误与时延
+    rules:
+      # 5xx 占比。分母为 0 时结果是 NaN，NaN > 0.05 为假，所以没流量时不会误报。
+      # 但只有零星几个请求时比例会很跳，所以额外要求「至少有点量」。
+      - alert: Qi五百错误偏多
+        expr: >-
+          sum by (job, instance) (rate(http_server_requests_total{http_response_status_code=~"5.."}[5m]))
+          /
+          sum by (job, instance) (rate(http_server_requests_total[5m]))
+          > 0.05
+          and
+          sum by (job, instance) (rate(http_server_requests_total[5m])) > 0.05
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.instance }} 5xx 占比 {{ $value | humanizePercentage }}"
+
+      # 单条路由挂了。总量看着正常但某个接口全在报错的情况，上面那条抓不到。
+      - alert: Qi某条路由在报错
+        expr: >-
+          sum by (job, instance, http_route) (rate(http_server_requests_total{http_response_status_code=~"5.."}[5m])) > 0.1
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.http_route }} 每秒 {{ $value | printf \"%.2f\" }} 个 5xx"
+
+      # P95 时延。**分组必须带 le** —— 少了它 histogram_quantile 算出来的是
+      # 一个没有意义的数，而且不会报错，是那种看着正常的错。
+      - alert: Qi时延变高
+        expr: >-
+          histogram_quantile(0.95,
+            sum by (job, instance, http_route, le) (rate(http_server_request_duration_seconds_bucket[5m]))
+          ) > 1
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.http_route }} P95 {{ $value | printf \"%.2f\" }}s"
+          description: >-
+            桶最大 10s，超过 10s 的请求只会落进 +Inf，此时 P95 会顶在 10 附近而不是继续涨 ——
+            看到 10 左右不动，说明真实值可能远大于 10。
+
+      # 在处理中的请求堆积。这是饱和信号，比时延更早。
+      - alert: Qi请求堆积
+        expr: http_server_active_requests > 50
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.instance }} 有 {{ $value }} 个请求同时在处理"
+
+  - name: qi-web-指标系统自身
+    rules:
+      # 正在丢指标。这条一响就说明看板上的数**已经不全**了 ——
+      # 优先级不低，因为它会让别的告警一起失真。
+      - alert: Qi指标溢出
+        expr: increase(qi_web_metric_overflow_total[10m]) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.instance }} 十分钟内丢了 {{ $value }} 条指标记录"
+          description: >-
+            时间序列数撞了上限（默认 512），多出来的被丢掉了。
+            多半是哪个标签放了无限集的值（用户 ID、原始路径、搜索词）。
+            查 qi_web_metric_series 涨在哪条指标上。
+
+      # 快撞上限了，提前说。
+      - alert: Qi指标基数偏高
+        expr: qi_web_metric_series > 400
+        for: 30m
+        labels: { severity: info }
+        annotations:
+          summary: "{{ $labels.instance }} 时间序列 {{ $value }} 条，上限 512"

@@ -47,6 +47,13 @@ export interface Command {
   payloadText?: string;
   /** type==="js"：服务端下发的客户端动作串（对标 JS.exec） */
   ops?: JsOp[];
+  /** type==="patch"：1 = replaceState（不进历史），给搜索框那种高频同步用 */
+  replace?: number;
+  /** type==="cookie"：写一个非 HttpOnly 的 cookie（LiveView 事件回不了 Set-Cookie）*/
+  value?: string;
+  path?: string;
+  maxAge?: number;
+  sameSite?: string;
 }
 
 export type Payload = Record<string, unknown>;

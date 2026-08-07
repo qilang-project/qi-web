@@ -279,6 +279,86 @@ Connect 协议 unary + JSON codec（connect-go/connect-es/buf curl 可直连）�
 
 错误码映射（Connect 规范子集）：invalid_argument/failed_precondition/out_of_range→400、unauthenticated→401、permission_denied→403、not_found→404、deadline_exceeded→408、already_exists/aborted→409、resource_exhausted→429、unimplemented→501、unavailable→503、其余→500。`application/proto` 请求回 415。示例 `examples/rpc_问候.qi`。
 
+## 指标（指标.qi，Prometheus / OpenTelemetry）
+
+一行挂上 `/metrics`。指标名按 OTel semconv（点换下划线），Prometheus 直接抓，
+OTel Collector 用 prometheus receiver 抓同一个口转 OTLP —— 一份输出喂两边。
+
+```qi
+导入 Web.指标::{挂指标};
+应用值 = 挂指标(应用值);               // 挂中间件 + /metrics
+应用值 = 挂指标于(应用值, "/_metrics");  // 换个路径
+```
+
+**业务指标**（计数器 / 量表 / 直方图，带标签）：
+
+```qi
+导入 Web.指标::{计数一, 计数加, 量表设, 量表加, 记录耗时,
+                指标说明, 注册指标带桶, 类_直方图, 桶组_慢, 标签, 标签二};
+
+指标说明("lessons_generated_total", "出好的课数，按成败分");
+计数一("lessons_generated_total", 标签二("kind","lesson","result","ok"));
+量表设("job_queue_depth", "", 队列长度(库));
+记录耗时("lesson_stage_duration_seconds", 标签("stage","text"), 耗时毫秒);
+```
+
+- **`记录耗时` 收毫秒，露出去是秒** —— 收毫秒是因为 `时间.现在毫秒()` 给的
+  就是毫秒，让调用点自己除 1000 迟早有人用整数除把 1234ms 变成 1 秒。
+- **桶组要选**：默认 `桶组_快`（5ms–10s，HTTP 时延）。LLM / TTS / 出图这类
+  几十秒起步的活儿必须 `注册指标带桶(名, 类_直方图(), 桶组_慢())`（1s–30min），
+  否则所有桶都是 0、全落进 `+Inf`，那张直方图除了总数什么都没告诉你。
+  桶组跟名字一起定死，**要在第一次记录之前调**。
+- 标签用 `标签()/标签二()/标签三()` 拼，它负责洗键名和转义值；
+  标签值只放**有限取值**的东西（阶段、成败、语言），别放用户输入或 ID。
+- 指标名不合法会被洗成合法的（非法字符→下划线）—— 一个坏名字会让**整份
+  输出解析失败**，那不是「少一条指标」是「监控全挂」。
+
+**从库里算的东西用收集器**，别在业务代码里定时刷 gauge —— 抓取周期是
+Prometheus 那边定的，自己定时要么太勤（白查库）要么太懒（数是陈的）：
+
+```qi
+加收集器(闭包() { 量表设("queue_depth", "", 查一下队列(库)); });
+```
+
+收集器在**处理 /metrics 的那条线**上同步跑，慢查询会直接变成抓取超时
+（Prometheus 默认 10 秒放弃），所以查库要自己带缓存。一个收集器抛异常
+只影响它自己，不会让整份输出没了。
+
+出这些：`http_server_request_duration_seconds`（histogram，11 桶）、
+`http_server_requests_total`、`http_server_active_requests`、
+`qi_web_uptime_seconds`、`qi_web_metric_series`、`qi_web_metric_overflow_total`。
+属性：`http_request_method` / `http_route` / `http_response_status_code`。
+
+- **标签用路由模板不用真实路径**（`/learn/{id}`，不是 `/learn/t660778cc`）——
+  否则一万个 id 就是一万条时间序列。模板由 `路由.路由模式(处理器索引)` 提供。
+- 计数器是**原子**的：并发 300 请求实测一条不丢。
+- 系列数封顶 512，撞顶并进 `route="__other__"`，并且 `qi_web_metric_overflow_total`
+  会涨 —— 悄悄丢指标比没有指标更坏。
+- 没匹配上任何路由的请求记成 `__unmatched__`。
+
+**默认关。** `/metrics` 里是整张路由表加流量分布，公网裸挂等于把系统结构
+和健康状况一起交出去。没设 `QI_METRICS_TOKEN` 就**连路由都不注册**（统计
+照常跑，配上重启就有）。
+
+```bash
+QI_METRICS_TOKEN=$(openssl rand -hex 24) ./你的应用
+curl -H "Authorization: Bearer $TOK" http://127.0.0.1:PORT/metrics
+QI_METRICS_TOKEN=public ./你的应用      # 内网确实不需要口令，要显式写
+```
+
+```yaml
+# prometheus.yml
+scrape_configs:
+  - job_name: qi
+    authorization: { credentials_file: /etc/prometheus/qi.token }
+    static_configs: [{ targets: ['127.0.0.1:41862'] }]
+```
+
+- **只认 `Authorization: Bearer`，不收 `?t=`** —— 查询串会进 access log、
+  进反代日志、进浏览器历史，等于把口令抄好几份到处放。
+- 口令不对一律 **404 不是 401** —— 401 等于回答了「这儿确实有个 /metrics」。
+- 比对走 `定时安全等于`（逐字节比完再判，不提前返回）。
+
 ## 中间件
 
 ```qi

@@ -81,3 +81,44 @@ describe('pushTo', () => {
     spy.mockRestore();
   });
 });
+
+/**
+ * replace —— 给搜索框那种「每敲几个字就同步一次 URL」用。
+ * 走 push 的话打完一句话会在历史里留下四五条，后退键像坏了一样。
+ */
+describe('pushTo(target, replace)', () => {
+  it('replace 时用 replaceState，不进历史', () => {
+    const push = vi.spyOn(history, 'pushState');
+    const rep = vi.spyOn(history, 'replaceState');
+    pushTo('?q=去公园', true);
+    expect(rep).toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
+    push.mockRestore();
+    rep.mockRestore();
+  });
+
+  it('地址栏照样变 —— 不进历史不等于不改 URL（还要能收藏、能分享）', () => {
+    pushTo('?q=去公园', true);
+    expect(decodeURIComponent(location.search)).toBe('?q=去公园');
+  });
+
+  it('载荷跟 push 那条一模一样，服务端读不出区别', () => {
+    expect(pushTo('?q=x', true)).toEqual(pushTo('?q=x', false));
+  });
+
+  it('不传第二个参数时还是 push（老调用点行为不变）', () => {
+    const push = vi.spyOn(history, 'pushState');
+    pushTo('?tab=已完成');
+    expect(push).toHaveBeenCalled();
+    push.mockRestore();
+  });
+
+  it('replaceState 被禁时不抛', () => {
+    const spy = vi.spyOn(history, 'replaceState').mockImplementation(() => {
+      throw new Error('禁用了');
+    });
+    expect(() => pushTo('?q=x', true)).not.toThrow();
+    expect(pushTo('?q=x', true).query).toEqual({ q: 'x' });
+    spy.mockRestore();
+  });
+});

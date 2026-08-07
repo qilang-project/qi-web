@@ -82,10 +82,21 @@ function runCmd(c: Command): void {
     const el = document.querySelector(c.target!);
     if (el) { try { el.scrollIntoView({ behavior: 'smooth', block: 'end' }); } catch { el.scrollIntoView(); } }
   } else if (c.type === 'patch') {
-    // 服务端主动改 URL（push_patch）：不重新加载，照常上报参数
-    sendRaw('__参数__', pushTo(c.target!));
+    // 服务端主动改 URL（push_patch）：不重新加载，照常上报参数。
+    // replace = 覆盖当前这条历史，给搜索框那种高频同步用
+    sendRaw('__参数__', pushTo(c.target!, c.replace === 1));
   } else if (c.type === 'js') {
     runOps(c.ops || [], null);
+  } else if (c.type === 'cookie') {
+    // LiveView 的事件回不了 Set-Cookie（响应是握手时那一次发的），所以
+    // 让浏览器自己写。**只能写非 HttpOnly 的**——会话令牌那种必须走普通
+    // 路由的 Set-Cookie，别用这条。
+    let s = encodeURIComponent(c.name || '') + '=' + encodeURIComponent(c.value || '');
+    s += '; path=' + (c.path || '/');
+    if (c.maxAge != null) s += '; max-age=' + c.maxAge;
+    s += '; samesite=' + (c.sameSite || 'Lax');
+    if (location.protocol === 'https:') s += '; secure';
+    document.cookie = s;
   } else if (c.type === 'event') {
     let d: unknown = null;
     try { d = JSON.parse(c.payloadText || 'null'); } catch { /* 载荷不是 JSON 就当 null */ }

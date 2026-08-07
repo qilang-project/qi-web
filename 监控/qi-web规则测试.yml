@@ -1,0 +1,120 @@
+# promtool test rules qi-web规则测试.yml
+#
+# 重点测**不该响的时候别响**：一条天天误报的规则比没有规则更坏，
+# 它会训练人忽略告警。
+
+rule_files:
+  - qi-web规则.yml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: 一成请求在报 5xx → 该响
+    input_series:
+      - series: 'http_server_requests_total{job="qi",instance="a:1",http_response_status_code="200"}'
+        values: "0+9x30"
+      - series: 'http_server_requests_total{job="qi",instance="a:1",http_response_status_code="500"}'
+        values: "0+1x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: Qi五百错误偏多
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: qi
+              instance: "a:1"
+            exp_annotations:
+              summary: "a:1 5xx 占比 10%"
+
+  # 这条是那个 `and rate > 0.05` 守卫存在的理由：夜里十分钟来了两个请求、
+  # 其中一个 500，比例是 50% —— 但那不值得半夜叫醒任何人。
+  - interval: 1m
+    name: 半夜零星两个请求挂了一个 → 不该响
+    input_series:
+      - series: 'http_server_requests_total{job="qi",instance="a:1",http_response_status_code="200"}'
+        values: "0 0 0 0 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1"
+      - series: 'http_server_requests_total{job="qi",instance="a:1",http_response_status_code="500"}'
+        values: "0 0 0 0 0 0 0 0 0 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: Qi五百错误偏多
+        exp_alerts: []
+
+  - interval: 1m
+    name: 全是 200 → 不该响
+    input_series:
+      - series: 'http_server_requests_total{job="qi",instance="a:1",http_response_status_code="200"}'
+        values: "0+10x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: Qi五百错误偏多
+        exp_alerts: []
+
+  - interval: 1m
+    name: 抓不到 → 该响
+    input_series:
+      - series: 'up{job="qi",instance="a:1"}'
+        values: "0+0x10"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: Qi应用抓不到
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: qi
+              instance: "a:1"
+            exp_annotations:
+              summary: "a:1 抓不到指标"
+              description: >-
+                两分钟没抓到 /metrics。可能是进程挂了、端口不通，
+                也可能是 QI_METRICS_TOKEN 配错了（口令不对返回的是 404，不是 401）。
+
+  # uptime 归零 = 重启过。用「比五分钟前小」而不是「小于 300 秒」——
+  # 后者在每次部署后都会持续响五分钟。
+  - interval: 1m
+    name: 进程重启 → 该响一下
+    input_series:
+      - series: 'qi_web_uptime_seconds{job="qi",instance="a:1"}'
+        values: "600+60x9 30+60x20"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: Qi应用重启了
+        exp_alerts:
+          - exp_labels:
+              severity: info
+              job: qi
+              instance: "a:1"
+            exp_annotations:
+              summary: "a:1 重启过"
+              description: "计划内部署可以忽略；频繁出现就是在反复崩溃。"
+
+  - interval: 1m
+    name: 一直没重启 → 不该响
+    input_series:
+      - series: 'qi_web_uptime_seconds{job="qi",instance="a:1"}'
+        values: "600+60x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: Qi应用重启了
+        exp_alerts: []
+
+  - interval: 1m
+    name: 指标在被丢弃 → 该响
+    input_series:
+      - series: 'qi_web_metric_overflow_total{job="qi",instance="a:1"}'
+        values: "0+5x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: Qi指标溢出
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: qi
+              instance: "a:1"
+            exp_annotations:
+              summary: "a:1 十分钟内丢了 50 条指标记录"
+              description: >-
+                时间序列数撞了上限（默认 512），多出来的被丢掉了。
+                多半是哪个标签放了无限集的值（用户 ID、原始路径、搜索词）。
+                查 qi_web_metric_series 涨在哪条指标上。
