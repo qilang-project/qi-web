@@ -5,6 +5,7 @@
  * 拖拽状态、第三方挂件全都挂在节点身份上，整区替换会全部丢掉。
  */
 import { attr, hasAttr, live } from './dom';
+import { markHookChange } from './hooks';
 
 function nkey(n: Node): string | null {
   return n.nodeType === 1 ? attr(n as Element, 'data-key') : null;
@@ -54,12 +55,12 @@ function syncAttrs(f: Element, t: Element): void {
 
   for (let i = f.attributes.length - 1; i >= 0; i--) {
     const a = f.attributes[i].name;
-    if (!t.hasAttribute(a) && !clientOwned(a)) f.removeAttribute(a);
+    if (!t.hasAttribute(a) && !clientOwned(a)) { f.removeAttribute(a); markHookChange(f); }
   }
   for (let i = 0; i < t.attributes.length; i++) {
     const a = t.attributes[i];
     if (clientOwned(a.name)) continue;
-    if (f.getAttribute(a.name) !== a.value) f.setAttribute(a.name, a.value);
+    if (f.getAttribute(a.name) !== a.value) { f.setAttribute(a.name, a.value); markHookChange(f); }
   }
   // 表单控件的「活值」：非焦点元素跟随服务端；焦点元素不动（保住正在输入的内容）
   const g = f.tagName;
@@ -75,11 +76,12 @@ function syncAttrs(f: Element, t: Element): void {
 
 export function morph(f: Node, t: Node): void {
   if (!same(f, t)) {
+    markHookChange(f);   // 被换掉的子树里若有 hook，靠帧尾对账走 destroyed/mounted
     f.parentNode?.replaceChild(t.cloneNode(true), f);
     return;
   }
   if (f.nodeType === 3 || f.nodeType === 8) {
-    if (f.nodeValue !== t.nodeValue) f.nodeValue = t.nodeValue;
+    if (f.nodeValue !== t.nodeValue) { f.nodeValue = t.nodeValue; markHookChange(f); }
     return;
   }
   if (f.nodeType !== 1) return;
@@ -107,7 +109,7 @@ export function morphKids(f: Element, t: Element): void {
     }
     if (m) {
       if (m === cur) cur = cur.nextSibling;
-      else f.insertBefore(m, cur);
+      else { f.insertBefore(m, cur); markHookChange(f); }
       morph(m, tn);
     } else if (cur && same(cur, tn) && !nkey(cur)) {
       const c = cur;
@@ -115,6 +117,7 @@ export function morphKids(f: Element, t: Element): void {
       morph(c, tn);
     } else {
       f.insertBefore(tn.cloneNode(true), cur);
+      markHookChange(f);
     }
     tn = nxt;
   }
@@ -122,5 +125,6 @@ export function morphKids(f: Element, t: Element): void {
     const d = cur;
     cur = cur.nextSibling;
     f.removeChild(d);
+    markHookChange(f);
   }
 }

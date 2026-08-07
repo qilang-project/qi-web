@@ -17,6 +17,7 @@ import { applyStreams } from './stream-ops';
 import { parseOps, runOps } from './js-ops';
 import { pushTo, urlPayload } from './patch-nav';
 import { bindUploads } from './upload';
+import { flushHooks, setHookSender } from './hooks';
 
 let cfg: LiveConfig = { ws: '', sub: null, hb: 0 };
 let ws: WebSocket | null = null;
@@ -110,6 +111,7 @@ function apply(m: Frame): void {
     denied = true;
     const root = live();
     if (root) root.innerHTML = '<p class="qi-denied">' + m.denied + '</p>';
+    flushHooks(null);   // 整区被拒绝文案覆盖，挂着的 hook 全部走 destroyed
     try { window.dispatchEvent(new CustomEvent('qi:denied', { detail: m.denied })); } catch { /* 旧浏览器 */ }
     if (ws) { try { ws.close(); } catch { /* 已关 */ } }
     return;
@@ -146,6 +148,9 @@ function apply(m: Frame): void {
     }
     clearLoad();
   }
+  // hook 生命周期对账：morph（html/patch/parts 帧）和流帧都会增删/改动节点。
+  // 指令帧、空 ACK 不碰 DOM，不用对。
+  if (m.html !== undefined || m.streams !== undefined) flushHooks(live());
   if (m.commands !== undefined && m.commands.forEach) m.commands.forEach(runCmd);
   // 收到**任何**一帧都算服务端答复过了 —— 触发事件的元素该退出 qi-loading。
   // 以前只有内容帧和指令帧清；流帧、空帧不清，按钮就一直灰着。
@@ -311,8 +316,11 @@ function start(c: LiveConfig): void {
   if (started || !c || !c.ws) return;
   started = true;
   cfg = c;
+  setHookSender((el) => (event, payload) => send(event, payload ?? {}, el));
   bind();
   connect();
+  // 首屏是 GET 直出的，第一个 WS 帧到之前 hook 也该活着（连接慢时尤其明显）
+  flushHooks(live());
 }
 
 function boot(): void {

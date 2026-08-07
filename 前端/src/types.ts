@@ -1,6 +1,7 @@
 import type { PlanNode, SlotPatch, SlotValue } from './template';
 import type { StreamPatch } from './stream-ops';
 import type { JsOp } from './js-ops';
+import type { Hook } from './hooks';
 
 /** 页面里由 qi 侧注入的配置：<script>window.QI_LIVE={ws:"/x/ws",sub:{...},hb:30000}</script> */
 export interface LiveConfig {
@@ -90,5 +91,7 @@ declare global {
     qiStream?: (opts: StreamOpts) => EventSource | null;
     /** 富渲染：markdown + table/list/kv/card 块 + 声明式动作按钮 */
     qiRich?: (el: HTMLElement, buf: string, act?: string) => void;
+    /** hook 注册表（对标 phx-hook）：data-hook="名字" ↔ 这里的键，见 hooks.ts */
+    qiHooks?: Record<string, Hook>;
   }
 }

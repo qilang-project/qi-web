@@ -32,6 +32,13 @@
 //   data-value-xxx="v"        事件参数（对标 phx-value-*），键为 xxx
 //   data-key="k"              morph 列表对齐键（对标 LiveView keyed comprehension）
 //   data-ignore               morph 跳过该元素子树（对标 phx-update="ignore"）
+//   data-hook="名字"          hook 生命周期（对标 phx-hook）：图表/地图/画布这类
+//                             要 JS 接管的节点。页面脚本里定义
+//                             window.qiHooks = {名字: {mounted(el,ctx), updated(el,ctx), destroyed(el)}}
+//                             mounted=进 DOM、updated=服务端这一帧改到了它（含子树）、
+//                             destroyed=被摘掉。ctx.push(事件名,载荷) 上行，与声明式
+//                             绑定同路（身份并入/组件路由/qi-loading）。配 data-key
+//                             才能跨帧保住节点身份，不然被 morph 换掉就白建实例。
 //
 // 声明式绑定盖不到的自定义交互（拖拽/画布/快捷键），用运行时暴露的：
 //   window.qiSend("事件名", {键: 值})     —— 身份字段自动并入，和声明式绑定一致
@@ -769,6 +776,7 @@
 // 运行时能力：
 // - morph 局部 patch（data-key 对齐 / data-ignore 跳过），焦点光标天然保留
 // - 事件委托绑定：data-click / data-input(+data-debounce) / data-keyup(+筛选) / data-submit
+// - data-hook 生命周期（mounted/updated/destroyed，注册表 window.qiHooks）
 // - data-value-* 事件参数并入载荷
 // - {"commands":[...]} 帧：跳转/标题/滚动/事件(CustomEvent qi:名称)
 // - 断线指数退避重连（0.5s→8s），body.qi-offline + qi:连接/qi:断线 事件

@@ -1,0 +1,122 @@
+// 实时页面示例：data-hook 生命周期（对标 phx-hook）。
+//
+// 场景是这个功能存在的理由：LiveView 管数据，但 <canvas> 得 JS 自己画 ——
+// 服务端只在属性里给数据（data-points），hook 负责：
+//   mounted    进 DOM 时画第一笔
+//   updated    服务端这一帧改了 data-points → 重画
+//   destroyed  被摘掉 → 清理（这里只记一行日志，真实场景是销毁图表实例/定时器）
+//
+// 注册表 window.qiHooks 在**页面片段里**的 <script> 定义：片段在运行时脚本
+// 之前，首屏解析时就执行了；之后的 morph 帧里脚本内容不变，节点原样保留，
+// 不会重复执行。JS 里的标识符一律英文 —— 中文只写在 qi 里。
+//
+// 跑：QI_PACKAGES_PATH=… qi run 实时_钩子.qi
+// 浏览器打开 http://127.0.0.1:6473/
+包 主程序;
+
+导入 标准库.字符串;
+导入 标准库.JSON 作为 J;
+导入 Web::{
+    应用, 创建应用, 配置,
+    实时路由_无鉴权,
+    运行应用
+};
+
+// hook 注册 + 画柱子。日志区带 data-ignore，morph 不碰，hook 自己往里写。
+函数 钩子脚本() : 字符串 {
+    返回 `<script>
+(function () {
+  function log(msg) {
+    var box = document.getElementById('log');
+    if (box) box.textContent += msg + '\n';
+  }
+  function draw(el) {
+    var canvas = el.querySelector('canvas');
+    if (!canvas) return;
+    var pen = canvas.getContext('2d');
+    pen.clearRect(0, 0, canvas.width, canvas.height);
+    var raw = el.getAttribute('data-points') || '';
+    var points = raw.split(',').filter(Boolean).map(Number);
+    for (var i = 0; i < points.length; i++) {
+      var h = points[i] * 10;
+      pen.fillStyle = '#4a7c59';
+      pen.fillRect(i * 28 + 4, canvas.height - h, 22, h);
+    }
+  }
+  window.qiHooks = {
+    BarChart: {
+      mounted: function (el, ctx) { draw(el); log('mounted，柱数 ' + (el.getAttribute('data-points') || '').split(',').filter(Boolean).length); },
+      updated: function (el) { draw(el); log('updated，柱数 ' + (el.getAttribute('data-points') || '').split(',').filter(Boolean).length); },
+      destroyed: function () { log('destroyed'); }
+    }
+  };
+})();
+</script>`;
+}
+
+函数 初始状态() : 整数 {
+    变量 状态: 整数 = J.创建对象();
+    J.设置字符串(状态, "点数", "3,7,2");
+    J.设置整数(状态, "显示图", 1);
+    返回 状态;
+}
+
+函数 渲染(状态: 整数) : 字符串 {
+    变量 片段: 字符串 = 钩子脚本();
+    片段 = 片段 + "<h1>data-hook 演示</h1>";
+    片段 = 片段 + "<p><button data-click=\"添点\">添一根柱子</button> ";
+    片段 = 片段 + "<button data-click=\"清空\">清空</button> ";
+    片段 = 片段 + "<button data-click=\"开关图\">显示/隐藏</button></p>";
+    如果 (J.获取整数(状态, "显示图") == 1) {
+        // data-key 保住节点身份：别的部分变化时图表不会被 morph 换掉重建
+        片段 = 片段 + "<div data-hook=\"BarChart\" data-key=\"chart\" data-points=\""
+                    + J.获取字符串(状态, "点数")
+                    + "\"><canvas width=\"300\" height=\"120\"></canvas></div>";
+    }
+    // data-ignore 只保**子树**不保**节点身份**：前面的图表整个消失那一帧，
+    // morph 按位置对齐会把这个 <pre> 换成新克隆，攒的日志就没了。
+    // 所以还得配 data-key —— 有 key 才能跨帧认领回同一个节点。
+    片段 = 片段 + "<h3>生命周期日志</h3><pre id=\"log\" data-key=\"log\" data-ignore></pre>";
+    返回 片段;
+}
+
+函数 处理事件(状态: 整数, 事件名: 字符串, 载荷JSON: 字符串) : 整数 {
+    如果 (字符串::等于(事件名, "添点") == 1) {
+        变量 点数: 字符串 = J.获取字符串(状态, "点数");
+        // 高度按已有柱数错开（1~9），示例里够用还可复现
+        变量 已有: 整数 = 数点(点数);
+        变量 新高: 整数 = (已有 * 3) % 9 + 1;
+        如果 (字符串::字节长度(点数) > 0) { 点数 = 点数 + ","; }
+        J.设置字符串(状态, "点数", 点数 + 整数转字符串(新高));
+    }
+    如果 (字符串::等于(事件名, "清空") == 1) {
+        J.设置字符串(状态, "点数", "");
+    }
+    如果 (字符串::等于(事件名, "开关图") == 1) {
+        J.设置整数(状态, "显示图", 1 - J.获取整数(状态, "显示图"));
+    }
+    返回 状态;
+}
+
+// 逗号分隔串里有几个数（空串是 0；个数 = 逗号数 + 1）
+函数 数点(点数: 字符串) : 整数 {
+    如果 (字符串::字节长度(点数) == 0) { 返回 0; }
+    变量 个数: 整数 = 1;
+    变量 剩余: 字符串 = 点数;
+    变量 位置: 整数 = 字符串::查找(剩余, ",");
+    当 (位置 >= 0) {
+        个数 = 个数 + 1;
+        剩余 = 字符串::子串(剩余, 位置 + 1, 字符串::字节长度(剩余) - 位置 - 1);
+        位置 = 字符串::查找(剩余, ",");
+    }
+    返回 个数;
+}
+
+函数 入口() {
+    变量 主机: 字符串 = "127.0.0.1";
+    变量 端口: 整数 = 6473;
+    变量 应用值: 应用 = 创建应用();
+    应用值 = 配置(应用值, 主机, 端口);
+    应用值 = 实时路由_无鉴权(应用值, "/", 初始状态, 渲染, 处理事件);
+    运行应用(应用值);
+}

@@ -405,6 +405,7 @@ DOM 树逐节点对齐，只改有差异的属性/文本/节点，焦点、光�
 | `data-value-xxx="v"` | —— 事件参数并入载荷 | | `phx-value-*` |
 | `data-key="k"` | —— morph 列表对齐键 | | keyed comprehension |
 | `data-ignore` | —— morph 跳过该子树 | | `phx-update="ignore"` |
+| `data-hook="名字"` | mounted / updated / destroyed 生命周期回调 | `ctx.push(事件,载荷)` 上行 | `phx-hook` |
 
 属性名会被浏览器小写化，所以多词参数写 kebab：`data-value-card-id` 上行时
 还原成 `cardId`。写成 `data-value-cardId` 会**静默失效**（浏览器存成
@@ -414,10 +415,17 @@ DOM 树逐节点对齐，只改有差异的属性/文本/节点，焦点、光�
 `指令_跳转(url)`、`指令_标题(文本)`、`指令_滚动(选择器)`、
 `指令_事件(名称, 载荷JSON)`（window 上派发 `CustomEvent "qi:名称"`，页面 JS 可监听）。
 
-- 内嵌 JS 运行时自动连 `路径 + "/ws"`；断线指数退避重连（0.5s 起 8s 封顶），
-  重连后自动恢复服务端状态；断线期间 `<body>` 带 class `qi-offline`（并派发
-  `qi:offline`/`qi:online` 事件）；触发事件的元素等待回帧期间带 class `qi-loading`。
+- 内嵌 JS 运行时自动连 `路径 + "/ws"`；断线指数退避重连（0.5s 起 8s 封顶）。
+  ⚠ 状态是每连接的：重连拿到的是**全新状态**，断开前的数据不恢复 ——
+  要跨连接存活就自己落库，或把状态编码进 URL（轻路由）。断线期间 `<body>`
+  带 class `qi-offline`（并派发 `qi:offline`/`qi:online` 事件）；触发事件的
+  元素等待回帧期间带 class `qi-loading`。
 - 渲染用户输入前先过 `转义HTML(文本)` 防注入。
+- 图表 / 地图 / 画布这类要 JS 接管的节点：页面脚本里定义
+  `window.qiHooks = {名字: {mounted(el, ctx), updated(el, ctx), destroyed(el)}}`，
+  模板里 `<div data-hook="名字" data-key="…">`。updated 只在服务端这一帧
+  真改到该元素（含子树）时触发；**要配 `data-key`**，不然节点被 morph 换掉
+  就是一轮白建的 destroyed + mounted。示例见 `examples/实时_钩子.qi`。
 - 完整示例见 `examples/实时_计数器.qi`（计数 + 防抖回显 + keyed 待办 + 标题指令）。
 
 ### 实时消息（定时器 / 后台任务 / 服务端主动推）
