@@ -1,0 +1,301 @@
+// 实时语音示例的浏览器侧：麦克风采集 → 上行，音频分片 → 播放。
+//
+// 单独一个文件，因为它整个就是一大段 JS，混在 qi 逻辑里读不动。
+//
+// ⚠ 这里面**一个中文标识符都不能有**：JS 变量、函数、参数、HTML 属性名、
+//    CSS 类名一律英文，中文只出现在给人看的文本和注释里。qi 文件里写内嵌
+//    <script> 是这条规矩最容易翻车的地方 —— 上下文全是中文，手一顺就写出
+//    `var 支持 = ...` 了。
+//
+// ── 音频链路 ─────────────────────────────────────────────────────
+//
+// 上行：getUserMedia → AudioContext({sampleRate:16000}) → AudioWorklet
+//       （**不是**废弃的 ScriptProcessor：那玩意在主线程跑，一卡就爆音）
+//       → Int16 攒够 1600 个采样（=100ms=3200 字节，官方示例的块大小）
+//       → base64 → {"type":"input_audio_buffer.append","audio":"…"}
+//
+// 下行：response.audio.delta 的 base64 → Int16 → AudioBuffer → 排队播放。
+//       **播放用 24kHz**，采集用 16kHz —— 两个采样率不一样是模型规定的，
+//       把播放也当 16k 会听到一个慢半拍的低音怪。
+//
+// 打断（barge-in）：服务端 VAD 一报 input_audio_buffer.speech_started 就把
+//       已排队的音频全停掉。不停的话你已经开口了它还在念上一段，两个人抢话。
+包 主程序;
+
+// 页面片段里内嵌的 <script>。片段排在运行时脚本之前，首屏解析时就执行；
+// 之后的 morph 帧里脚本节点内容不变，不会重复执行。
+函数 语音脚本() : 字符串 {
+    返回 `<script>
+(function () {
+  var CAPTURE_RATE = 16000;   // 上行：模型要求 16kHz PCM16 单声道
+  var PLAYBACK_RATE = 24000;  // 下行：模型吐的是 24kHz，别跟上行搞混
+  var CHUNK_SAMPLES = 1600;   // 100ms = 3200 字节
+
+  // AudioWorklet 的处理器必须是独立模块文件；这里用 Blob URL 现造一个，
+  // 免得为一段 30 行的代码多开一条静态路由。
+  var workletCode = [
+    'class CaptureProcessor extends AudioWorkletProcessor {',
+    '  constructor(options) {',
+    '    super();',
+    '    var target = options.processorOptions.targetRate;',
+    '    this.ratio = sampleRate / target;',
+    '    this.cursor = 0;',
+    '    this.buffer = new Int16Array(options.processorOptions.chunkSamples);',
+    '    this.filled = 0;',
+    '  }',
+    '  process(inputs) {',
+    '    var input = inputs[0];',
+    '    if (!input || !input[0]) return true;',
+    '    var channel = input[0];',
+    '    while (this.cursor < channel.length) {',
+    '      var sample = channel[Math.floor(this.cursor)];',
+    '      if (sample > 1) sample = 1;',
+    '      if (sample < -1) sample = -1;',
+    '      this.buffer[this.filled] = sample * 32767;',
+    '      this.filled = this.filled + 1;',
+    '      if (this.filled === this.buffer.length) {',
+    '        var out = this.buffer.slice();',
+    '        this.port.postMessage(out.buffer, [out.buffer]);',
+    '        this.filled = 0;',
+    '      }',
+    '      this.cursor = this.cursor + this.ratio;',
+    '    }',
+    '    this.cursor = this.cursor - channel.length;',
+    '    return true;',
+    '  }',
+    '}',
+    'registerProcessor("capture", CaptureProcessor);'
+  ].join('\n');
+
+  function log(text) {
+    var box = document.getElementById('log');
+    if (box) {
+      box.textContent += text + '\n';
+      box.scrollTop = box.scrollHeight;
+    }
+    if (window.console) console.log('[voice] ' + text);
+  }
+
+  function showTranscript(text) {
+    var box = document.getElementById('transcript');
+    if (box) box.textContent += text;
+  }
+
+  function clearTranscript() {
+    var box = document.getElementById('transcript');
+    if (box) box.textContent = '';
+  }
+
+  function toBase64(buffer) {
+    var bytes = new Uint8Array(buffer);
+    var binary = '';
+    var step = 0x8000;   // 一次 apply 太多参数会爆栈
+    for (var i = 0; i < bytes.length; i += step) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + step));
+    }
+    return btoa(binary);
+  }
+
+  function fromBase64(text) {
+    var binary = atob(text);
+    var bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+
+  // 一个会话的全部可变状态。mounted 建、destroyed 拆，别挂到 window 上 ——
+  // hook 可能被重新挂载，残留的旧 AudioContext 会继续占着麦克风。
+  function createSession(ctx) {
+    var self = {
+      socket: null,
+      micStream: null,
+      captureCtx: null,
+      playCtx: null,
+      worklet: null,
+      playHead: 0,
+      sources: [],
+      speechStartedAt: 0,
+      speechStoppedAt: 0,
+      waitingFirstAudio: false,
+      running: false
+    };
+
+    function phase(name) {
+      // 状态指示条由服务端渲染，所以这一步要上行（走 LiveView 那条连接）
+      ctx.push('语音阶段', { phase: name });
+    }
+
+    function stopPlayback() {
+      for (var i = 0; i < self.sources.length; i++) {
+        try { self.sources[i].stop(); } catch (err) { /* 已经播完了 */ }
+      }
+      self.sources = [];
+      self.playHead = 0;
+    }
+
+    function enqueueAudio(bytes) {
+      if (!self.playCtx) return;
+      var samples = new Int16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength >> 1);
+      var frame = self.playCtx.createBuffer(1, samples.length, PLAYBACK_RATE);
+      var channel = frame.getChannelData(0);
+      for (var i = 0; i < samples.length; i++) channel[i] = samples[i] / 32768;
+      var node = self.playCtx.createBufferSource();
+      node.buffer = frame;
+      node.connect(self.playCtx.destination);
+      var now = self.playCtx.currentTime;
+      // 排在上一块之后；落后于当前时间就补一点余量，不然会咔哒一声
+      if (self.playHead < now + 0.05) self.playHead = now + 0.05;
+      node.start(self.playHead);
+      self.playHead += frame.duration;
+      self.sources.push(node);
+      node.onended = function () {
+        var at = self.sources.indexOf(node);
+        if (at >= 0) self.sources.splice(at, 1);
+      };
+    }
+
+    function onServerEvent(event) {
+      if (event.type === 'session.created') {
+        log('会话已建立');
+        phase('listening');
+      } else if (event.type === 'session.updated') {
+        log('会话配置已生效');
+      } else if (event.type === 'input_audio_buffer.speech_started') {
+        self.speechStartedAt = performance.now();
+        self.waitingFirstAudio = true;
+        stopPlayback();          // 打断：用户开口，别再念上一段
+        clearTranscript();
+        phase('listening');
+        log('听到你开口了');
+      } else if (event.type === 'input_audio_buffer.speech_stopped') {
+        self.speechStoppedAt = performance.now();
+        log('你说完了，等回答');
+      } else if (event.type === 'response.audio.delta') {
+        if (self.waitingFirstAudio) {
+          self.waitingFirstAudio = false;
+          var sinceStart = Math.round(performance.now() - self.speechStartedAt);
+          var sinceStop = self.speechStoppedAt
+            ? Math.round(performance.now() - self.speechStoppedAt) : -1;
+          log('首音延迟：开口起 ' + sinceStart + 'ms，说完起 ' + sinceStop + 'ms');
+          window.qiVoiceFirstAudio = { sinceStart: sinceStart, sinceStop: sinceStop };
+          phase('speaking');
+        }
+        enqueueAudio(fromBase64(event.delta));
+      } else if (event.type === 'response.audio_transcript.delta') {
+        showTranscript(event.delta);
+      } else if (event.type === 'response.done') {
+        log('这一轮回答结束');
+        phase('listening');
+      } else if (event.type === 'error') {
+        var detail = event.error || {};
+        log('错误：' + (detail.code || detail.type || '?') + ' ' + (detail.message || ''));
+        phase('error');
+      }
+      window.qiVoiceSeen = window.qiVoiceSeen || {};
+      window.qiVoiceSeen[event.type] = (window.qiVoiceSeen[event.type] || 0) + 1;
+    }
+
+    self.start = function () {
+      if (self.running) return;
+      self.running = true;
+      phase('connecting');
+      log('请求麦克风…');
+
+      navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
+      }).then(function (stream) {
+        self.micStream = stream;
+        log('麦克风已就绪');
+        // 直接问浏览器要 16k 的上下文，重采样交给它做；拿不到 16k 时
+        // worklet 里的 ratio 会兜底（Firefox 早期版本会忽略这个参数）
+        self.captureCtx = new (window.AudioContext || window.webkitAudioContext)({
+          sampleRate: CAPTURE_RATE
+        });
+        self.playCtx = new (window.AudioContext || window.webkitAudioContext)({
+          sampleRate: PLAYBACK_RATE
+        });
+        var blob = new Blob([workletCode], { type: 'application/javascript' });
+        return self.captureCtx.audioWorklet.addModule(URL.createObjectURL(blob));
+      }).then(function () {
+        var source = self.captureCtx.createMediaStreamSource(self.micStream);
+        self.worklet = new AudioWorkletNode(self.captureCtx, 'capture', {
+          processorOptions: { targetRate: CAPTURE_RATE, chunkSamples: CHUNK_SAMPLES }
+        });
+        self.worklet.port.onmessage = function (message) {
+          if (!self.socket || self.socket.readyState !== 1) return;
+          self.socket.send(JSON.stringify({
+            type: 'input_audio_buffer.append',
+            audio: toBase64(message.data)
+          }));
+          window.qiVoiceSentChunks = (window.qiVoiceSentChunks || 0) + 1;
+        };
+        source.connect(self.worklet);
+        // worklet 不接 destination 就不会被调度；接 destination 又会把
+        // 麦克风原样播出来变成啸叫，所以中间垫一个静音增益。
+        var mute = self.captureCtx.createGain();
+        mute.gain.value = 0;
+        self.worklet.connect(mute);
+        mute.connect(self.captureCtx.destination);
+
+        var scheme = location.protocol === 'https:' ? 'wss://' : 'ws://';
+        self.socket = new WebSocket(scheme + location.host + '/voice/ws');
+        self.socket.onopen = function () { log('已连上语音中继'); };
+        self.socket.onmessage = function (message) {
+          var event;
+          try { event = JSON.parse(message.data); } catch (err) { return; }
+          onServerEvent(event);
+        };
+        self.socket.onclose = function () {
+          log('语音连接已关闭');
+          phase('idle');          // 按钮文字跟着服务端这一帧变回「开麦克风」
+          self.running = false;
+        };
+        self.socket.onerror = function () { log('语音连接出错'); phase('error'); };
+      }).catch(function (err) {
+        self.running = false;
+        log('启动失败：' + err);
+        phase('error');
+      });
+    };
+
+    self.stop = function () {
+      stopPlayback();
+      if (self.socket) { try { self.socket.close(); } catch (err) {} self.socket = null; }
+      if (self.worklet) { try { self.worklet.disconnect(); } catch (err) {} self.worklet = null; }
+      if (self.micStream) {
+        var tracks = self.micStream.getTracks();
+        for (var i = 0; i < tracks.length; i++) tracks[i].stop();
+        self.micStream = null;
+      }
+      if (self.captureCtx) { try { self.captureCtx.close(); } catch (err) {} self.captureCtx = null; }
+      if (self.playCtx) { try { self.playCtx.close(); } catch (err) {} self.playCtx = null; }
+      self.running = false;
+      phase('idle');
+    };
+
+    return self;
+  }
+
+  var sessions = new WeakMap();
+
+  window.qiHooks = window.qiHooks || {};
+  window.qiHooks.VoiceMic = {
+    mounted: function (el, ctx) {
+      var session = createSession(ctx);
+      sessions.set(el, session);
+      el.addEventListener('click', function () {
+        if (session.running) session.stop(); else session.start();
+      });
+      // 自动化测试用：不点按钮也能开麦
+      window.qiVoiceStart = function () { session.start(); };
+      window.qiVoiceStop = function () { session.stop(); };
+      log('麦克风控件已就绪');
+    },
+    destroyed: function (el) {
+      var session = sessions.get(el);
+      if (session) { session.stop(); sessions.delete(el); }
+    }
+  };
+})();
+</script>`;
+}
