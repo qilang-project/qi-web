@@ -803,6 +803,86 @@ curl -X POST http://127.0.0.1:7429/greet.GreeterService/SayHello \
 - `connect-protocol-version: 1` 请求头按规范忽略；`application/proto` 请求回 415。
 - 完整示例（含错误路径）见 `examples/rpc_问候.qi`。
 
+## 数据库：查询 / 迁移 / 建表
+
+数据层分三层，都是纯 qi：
+
+- `查询.qi` —— 链式查询构建器 + 参数绑定（值一律 `?`，标识符走白名单）
+- `仓储.qi` —— 泛型「实体 ↔ 表」映射
+- `迁移.qi` —— 版本化迁移，每个版本一个 `函数(事务句柄):整数` 回调
+- `建表.qi` —— **方言 DDL 建表助手（SQLite / PostgreSQL / MySQL）**
+
+### 建表助手
+
+查询能靠中间层抹平（对外永远 `?`），建表抹不平：自增主键、布尔、时间戳、
+当前时间默认值三家写法互不兼容。按 Rails / Django / Flyway 的分层，方言 DDL
+属于迁移层而不是驱动层，所以它在 `建表.qi`，不在 FFI 里。
+
+```qi
+导入 Web.建表::{
+    表定义, 新建表, 当前后端, 列自增主键, 列整数, 列文本,
+    非空, 默认文本, 默认当前时间, 列时间戳, 唯一组, 事务建表, 生成建表SQL
+};
+
+函数 卡片表(后端: 字符串) : 表定义 {
+    变量 定义: 表定义 = 新建表(后端, "卡片");
+    定义 = 列自增主键(定义, "id");
+    定义 = 非空(列整数(定义, "用户id"));
+    定义 = 默认文本(非空(列文本(定义, "标题")), "无题");
+    定义 = 默认当前时间(列时间戳(定义, "创建时间"));
+    定义 = 唯一组(定义, "用户id, 标题");
+    返回 定义;
+}
+
+函数 迁移一(事务: 整数) : 整数 {      // 交给 执行迁移(库, "模式迁移", 1, "创建卡片", 迁移一)
+    返回 事务建表(事务, 卡片表(当前后端()));
+}
+```
+
+同一份声明产出：
+
+```sql
+-- sqlite
+CREATE TABLE IF NOT EXISTS 卡片 (id INTEGER PRIMARY KEY AUTOINCREMENT, 用户id INTEGER NOT NULL,
+  标题 TEXT NOT NULL DEFAULT '无题', 创建时间 TEXT DEFAULT (datetime('now')), UNIQUE (用户id, 标题))
+-- postgres
+CREATE TABLE IF NOT EXISTS 卡片 (id BIGSERIAL PRIMARY KEY, 用户id BIGINT NOT NULL,
+  标题 TEXT NOT NULL DEFAULT '无题', 创建时间 TIMESTAMPTZ DEFAULT now(), UNIQUE (用户id, 标题))
+-- mysql
+CREATE TABLE IF NOT EXISTS 卡片 (id BIGINT AUTO_INCREMENT PRIMARY KEY, 用户id BIGINT NOT NULL,
+  标题 VARCHAR(255) NOT NULL DEFAULT '无题', 创建时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (用户id, 标题)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+```
+
+API：
+
+| 分类 | 函数 |
+|---|---|
+| 起点 / 终结 | `新建表(后端, 表名)`、`生成建表SQL(定义)`、`事务建表(事务, 定义)`、`库建表(库, 定义)` |
+| 列类型 | `列自增主键` `列整数` `列文本` `列长文本` `列浮点` `列布尔` `列时间戳` |
+| 列修饰 | `非空` `唯一` `默认文本` `默认整数` `默认浮点` `默认布尔` `默认当前时间` |
+| 表级 | `唯一组(定义, "甲, 乙")` |
+| 后端 | `当前后端()` / `当前后端(库)`、`规范后端(名)` |
+| DML 片段 | `当前时间表达式(后端)`、`冲突更新子句(后端, 冲突列, 更新列)`（upsert 尾巴） |
+
+要点：
+
+- 修饰符作用于**最近一列**，不用重复列名：`默认文本(非空(列文本(定义, "标题")), "无题")`。
+  `列自增主键` 例外 —— 它三家的写法是固定串，直接封口、不接受修饰。
+- 类型映射按 qi 的语义选，不是照抄惯例：`整数` 是 i64，所以 PG 用 `BIGSERIAL`/`BIGINT`
+  而不是 `SERIAL`/`INT`；`列文本` 在 MySQL 上是 `VARCHAR(255)`（MySQL 的 `TEXT`
+  不能整列唯一、不能有默认值），要真正的长文本用 `列长文本`。
+- 产不出合法 DDL 时当场 `抛出`，不生成一段只在某个后端报错的 SQL：非法表名/列名、
+  无待定列时的修饰、MySQL 上给 `列长文本` 加 `唯一`/默认值、默认值里含反斜杠
+  （MySQL 与 SQLite/PG 的转义规则不同）。
+- **后端判定是临时实现**：驱动层的 `数据库.后端(句柄)` 还没落地，`当前后端()`
+  先读环境变量 `QI_DB_BACKEND`（不设即 `sqlite`）。真函数到位后只换 `当前后端` 的
+  函数体，调用方不动。
+- 已有的裸 DDL 不强制迁移：它们在 SQLite 上照常工作，真要换后端时才改写那一处。
+
+设计背景见 `docs/多数据库设计.md`；可运行示例 `examples/多后端建表.qi`
+（打印三段 DDL + 在 SQLite 上真跑一遍建表/插入/默认值）。
+
 ## 现在的取舍
 
 当前版本优先把下面这条链路做稳：
@@ -876,6 +956,10 @@ qi-web/
 ├── 表单.qi
 ├── 上传.qi
 ├── RPC.qi
+├── 查询.qi
+├── 仓储.qi
+├── 迁移.qi
+├── 建表.qi
 └── examples/
     ├── 一等处理器.qi
     ├── 完整服务器.qi
@@ -886,5 +970,7 @@ qi-web/
     ├── 路由分组.qi
     ├── llm_聊天_SSE.qi
     ├── 实时_计数器.qi
+    ├── 参数查询与迁移.qi
+    ├── 多后端建表.qi
     └── rpc_问候.qi
 ```
