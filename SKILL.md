@@ -1,9 +1,9 @@
 ---
 name: qi-web
-description: Build HTTP servers and web applications in the Qi (奇语) programming language using the qi-web framework — an Express/Fiber-style router with middleware, route groups, path params ({名} syntax), request/response helpers, redirects, file sending, static directories, chunked streaming, sessions/signed cookies, Bearer auth helpers, and a Rust-accelerated hot path (~122k RPS). Use when the user writes Qi web servers, REST APIs, or asks about routing, middleware, handlers, request parsing, responses, 发送文件, 静态目录, 会话, 认证, or 重定向 in Qi. Requires the qi-lang skill for base language syntax.
+description: Build HTTP servers, web applications and real-time UIs in the Qi (奇语) programming language using the qi-web framework — an Express/Fiber-style router with middleware, route groups, path params ({名} syntax), request/response helpers, redirects, binary-safe file sending and static directories (sendfile), chunked streaming, SSE, sessions/signed cookies, Bearer auth, and a Rust-accelerated hot path (~122k RPS). Also covers LiveView-style server-rendered real-time pages (实时块路由带请求, DOM morph patching, structured slot diff, data-click/data-submit/data-change/data-patch bindings, data-hook + data-ignore for third-party JS, 实时异步/实时定时 server-push via per-connection mailboxes, live components, streams, uploads, forms). Use when the user writes Qi web servers, REST APIs, or real-time pages, or asks about 路由, 中间件, handlers, 请求解析, 响应, 发送文件, 静态目录, 会话, 认证, 重定向, LiveView, or 实时页面 in Qi. Requires the qi-lang skill for base language syntax.
 metadata:
   author: qilang
-  version: "0.2"
+  version: "0.3"
 ---
 
 # qi-web — Qi 语言 Web 框架
@@ -97,7 +97,10 @@ metadata:
 变量 响应值 = 设置响应头(文本("ok"), "X-Custom", "值");
 ```
 
-⚠️ **二进制文件发不出**：`发送文件`/`下载文件`/静态中间件都把文件读进 UTF-8 `字符串` 再经字符串管道拼响应——图片/字体/PDF/zip 会被破坏。只用它们发**文本资产**（html/css/js/json/svg）。二进制的出路：① base64 内联进 HTML/JSON（data URI）；② 交给外部静态服务/CDN；③ 用字节精确的流式接口 `流发送块`（见下）。
+✅ **二进制是安全的**（2026-08 起）：`发送文件` / `下载文件` / 静态中间件都不再走 UTF-8 字符串管道 ——
+它们只在响应头里放一个 `X-Qi-Sendfile` 标记，真实字节由 Rust 层 `std::fs::read` 直发，
+并透传 `Range` 头做 206 部分响应。实测 4104 字节 PNG 取回 md5 与原文件一致。
+**图片/字体/PDF/zip 直接发，不要再 base64 内联**（旧文档那条已作废）。
 
 ## 静态目录
 
@@ -105,7 +108,18 @@ metadata:
 应用值 = 静态目录(应用值, "/static", "./public");   // (应用, URL前缀, 目录)
 ```
 
-注册静态文件中间件；同样受上述 UTF-8 限制，只适合文本资产。
+注册静态文件中间件。任意类型都能发（含二进制），带 MIME 推断 + `Cache-Control` + `Range`。
+
+⚠️ **目录必须是绝对路径**。给相对路径时「文件存在」那一关会过（它按进程 CWD 找），
+到 sendfile 才被拒（那层只认 `/` 或 `C:\` 开头），浏览器拿到
+`500 Internal Server Error: invalid sendfile path`，而文件明明就在那儿。
+
+```qi
+导入 标准库.操作系统 作为 系统;
+应用值 = 静态目录(应用值, "/static", 系统.当前目录() + "/public");
+```
+
+URL 路径也一律 ASCII —— 中文文件名要经百分号编码往返，不值得。
 
 ## chunked 流式（双向支持）
 
@@ -143,6 +157,44 @@ EventSource 断连会自动重连重放——一次性流发 `done` 之类结束
 转义HTML(文本)                                          // 渲染用户输入前防注入
 实时指令(状态, 指令_标题("…"));                          // 渲染帧之后下发；另有 指令_跳转/滚动/事件/提示
 ```
+
+**真实应用几乎都用这一个**（把上面几条路合成一条：结构化 diff + 准入 + URL 参数 + 服务端消息）：
+
+```qi
+导入 Web::{实时块路由带请求};
+
+函数 订阅载荷(上下文值: 上下文) : 字符串      // 首屏 GET —— **唯一读得到 cookie 的地方**，
+                                              //   结果会被烤进页面再由客户端回传
+函数 准入(载荷JSON: 字符串) : 字符串          // 回空串 = 拒绝并断开
+函数 初始状态(身份: 字符串, 载荷JSON: 字符串) : 整数
+函数 渲染(状态: 整数) : HTML块
+函数 处理事件(状态: 整数, 事件名: 字符串, 载荷JSON: 字符串) : 整数   // 客户端来的
+函数 处理参数(状态: 整数, 路径: 字符串, 查询JSON: 字符串) : 整数     // 轻路由 data-patch
+函数 处理消息(状态: 整数, 消息名: 字符串, 载荷JSON: 字符串) : 整数   // 服务端自己来的
+
+应用值 = 实时块路由带请求(应用值, "/ask", 订阅载荷, 准入, 初始状态,
+    渲染, 处理事件, 处理参数, 处理消息);
+// 多一个 头部函数(状态): 字符串 的重载 —— 用来出这一页的 <title> / <meta> / <script src>
+```
+
+WS 路径是路由路径 + `/ws`。**路由路径必须 ASCII**（含中文会 panic）。
+
+### 客户端绑定速查
+
+| 属性 | 触发 |
+|---|---|
+| `data-click="事件名"` | 点击；`data-value-*` 自动并进载荷（`data-value-card-id` → `cardId`） |
+| `data-submit="事件名"` | 表单提交，整张表的 FormData 进载荷；提交后表单会 reset |
+| `data-change="事件名"` | 表单任一字段变化，**整张表**上行，默认防抖 200ms |
+| `data-input` / `data-keyup` | 单个输入框；`data-debounce` / `data-key-filter` |
+| `data-patch="?a=1"` | 轻路由，走 `处理参数`，不重建连接 |
+| `data-hook="名"` | 交给 JS 接管：`window.qiHooks.名 = {mounted, updated, destroyed}` |
+| `data-ignore` | **属性照常同步，子树不进** —— 第三方 JS 拥有这片 DOM 时用它 |
+| `data-js-click` / `data-js-keep` | 纯客户端动作 / class 与 style 归客户端管 |
+
+`data-hook` + `data-ignore` 是接第三方渲染库（图表、编辑器、地图）的标准配方：
+服务端只翻一个 `data-rev` 属性，hook 的 `updated` 就被叫到，子树始终归那个库。
+数据别放 hook 内部（被 ignore 挡住拿不到新值），放旁边一个隐藏 div 里。
 
 **HTML 属性名一律英文**（中文属性名对 CSS 选择器和 devtools 不友好）；事件名本身随意，中文没问题：
 `data-click` / `data-input`（+`data-debounce`）/ `data-keyup`（+`data-key-filter`、`data-clear-on-key`）/ `data-submit` / `data-confirm`；
@@ -400,4 +452,4 @@ wrk -t4 -c100 -d10s http://127.0.0.1:6790/
 - **路由 path 不要含中文**（会 panic），用 ASCII 路径
 - 跨包导入用 destructure：`导入 Web::{创建应用, 获取, 文本, ...}`，逐个列出要用的符号
 - 结构体字面量一律 `新建 类型{...}`（括号包裹写法已从语言删除，见 qi-lang 技能）
-- 二进制静态资产发不出（UTF-8 字符串管道），见上文「响应助手」
+- 静态目录必须给绝对路径（相对路径会在 sendfile 层 500），见上文「静态目录」
