@@ -197,7 +197,7 @@
     返回 HTML {
         {闪现块(状态)}
         <h3>{标题}</h3>
-        <form class="qi-admin-form" data-submit="保存">
+        <form class="qi-admin-form" data-submit="保存" data-hook="QiAdminWhen">
             {域}
             <div class="qi-admin-bar">
                 <button type="submit">保存</button>
@@ -248,9 +248,15 @@
   function syncAll() {
     document.querySelectorAll('form.qi-admin-form').forEach(sync);
   }
+  // 重渲染后的再同步走 hook —— **框架没有 qi:patched 这种全局事件**
+  // （臆想过一次，代价是 morph 之后条件字段全部回到 hidden 初始态）。
+  // mounted/updated 由 morph 在表单出现/变化时调用。
+  window.qiHooks = window.qiHooks || {};
+  window.qiHooks.QiAdminWhen = {
+    mounted: function (el) { sync(el); },
+    updated: function (el) { sync(el); }
+  };
   document.addEventListener('DOMContentLoaded', syncAll);
-  // morph 之后节点是新的，得再算一遍。LiveView 每帧都会派这个事件。
-  document.addEventListener('qi:patched', syncAll);
   syncAll();
 })();
 </script>
