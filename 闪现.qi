@@ -70,22 +70,22 @@
     变量 级: 字符串 = 取闪现级(状态);
     变量 话: 字符串 = 取闪现(状态);
     如果 (字符串::字节长度(话) == 0) { 返回 创建片段(); }
-    变量 类: 字符串 = "qi-闪 qi-闪-" + 级;
+    变量 类: 字符串 = "qi-flash qi-flash-" + 级;
     // role=status 让读屏软件念出来 —— 操作结果不该只有看得见的人知道
     返回 HTML { <div class={类} role="status">{话}</div> };
 }
 
 公开 函数 闪现样式() : 字符串 {
     返回 `<style>
-.qi-闪{
+.qi-flash{
   padding:8px 12px; margin:10px 0; border-radius:6px; font-size:13px;
   border:1px solid currentColor;
-  animation:qi-闪入 .18s ease-out;
+  animation:qi-flash-in .18s ease-out;
 }
-.qi-闪-好{color:#1d6f42; background:color-mix(in srgb, #1d6f42 8%, transparent)}
-.qi-闪-坏{color:#a3242c; background:color-mix(in srgb, #a3242c 8%, transparent)}
-.qi-闪-醒{color:#8a5a00; background:color-mix(in srgb, #8a5a00 10%, transparent)}
-@keyframes qi-闪入{from{opacity:0; transform:translateY(-4px)} to{opacity:1}}
+.qi-flash-ok{color:#1d6f42; background:color-mix(in srgb, #1d6f42 8%, transparent)}
+.qi-flash-bad{color:#a3242c; background:color-mix(in srgb, #a3242c 8%, transparent)}
+.qi-flash-warn{color:#8a5a00; background:color-mix(in srgb, #8a5a00 10%, transparent)}
+@keyframes qi-flash-in{from{opacity:0; transform:translateY(-4px)} to{opacity:1}}
 </style>
 `;
 }

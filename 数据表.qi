@@ -156,12 +156,12 @@
     如果 (表 > 0) { 行数 = J.数组长度(表); }
     如果 (行数 == 0) {
         如果 (表 > 0) { J.删除(表); }
-        返回 HTML { <p class="qi-表-空">{选.空话}</p> };
+        返回 HTML { <p class="qi-table-empty">{选.空话}</p> };
     }
 
     变量 头: HTML块 = 创建片段();
     如果 (选.带序号 == 1) {
-        头 = 块加子块(头, HTML { <th class="qi-表-序">#</th> });
+        头 = 块加子块(头, HTML { <th class="qi-table-idx">#</th> });
     }
     对于 c 在 0 直到 长度(列) { 头 = 块加子块(头, 表头格(列[c], 选)); }
 
@@ -171,7 +171,7 @@
         变量 格组: HTML块 = 创建片段();
         如果 (选.带序号 == 1) {
             格组 = 块加子块(格组, HTML {
-                <td class="qi-表-序">{整数转字符串(r + 1)}</td>
+                <td class="qi-table-idx">{整数转字符串(r + 1)}</td>
             });
         }
         对于 c 在 0 直到 长度(列) {
@@ -183,7 +183,7 @@
     J.删除(表);
 
     返回 HTML {
-        <table class="qi-表"><thead><tr>{头}</tr></thead><tbody>{身}</tbody></table>
+        <table class="qi-table"><thead><tr>{头}</tr></thead><tbody>{身}</tbody></table>
     };
 }
 
@@ -192,7 +192,7 @@
 // 用 data-patch 不用 data-click：**排序属于地址**，不属于组件内部状态。
 // 走 data-click 的话刷新一下排序就没了，链接分享出去也不带排序。
 函数 表头格(列: 列规格, 选: 表选项) : HTML块 {
-    变量 类: 字符串 = "qi-表-头 " + 对齐类(列.类型);
+    变量 类: 字符串 = "qi-table-head " + 对齐类(列.类型);
     如果 (列.可排 == 0 或 字符串::字节长度(选.基础路径) == 0) {
         返回 HTML { <th class={类}>{列.标题}</th> };
     }
@@ -209,7 +209,7 @@
     变量 去: 字符串 = 选.基础路径 + "?排=" + 列.键 + "&向=" + 下一向;
     返回 HTML {
         <th class={类}>
-            <a class="qi-表-排" data-patch={去} href={去}>{列.标题 + 记号}</a>
+            <a class="qi-table-sort" data-patch={去} href={去}>{列.标题 + 记号}</a>
         </th>
     };
 }
@@ -218,7 +218,7 @@
     // **取显示值**不是 获取字符串：后者只认字符串，数字列会渲染成一片空白，
     // 而一列空白看起来像"本来就没数据"，不像 bug。
     变量 原: 字符串 = J.取显示值(行, 列.键);
-    变量 类: 字符串 = "qi-表-格 " + 对齐类(列.类型);
+    变量 类: 字符串 = "qi-table-cell " + 对齐类(列.类型);
 
     如果 (字符串::等于(列.类型, "数字") == 1) {
         返回 HTML { <td class={类}>{加千分位(原)}</td> };
@@ -240,9 +240,9 @@
 // 数字列必须右对齐 —— 左对齐的数字列，位数不同的数就没法一眼比大小，
 // 而"一眼比大小"是这一列存在的理由。
 函数 对齐类(类型名: 字符串) : 字符串 {
-    如果 (字符串::等于(类型名, "数字") == 1) { 返回 "qi-右"; }
-    如果 (字符串::等于(类型名, "金额") == 1) { 返回 "qi-右"; }
-    返回 "qi-左";
+    如果 (字符串::等于(类型名, "数字") == 1) { 返回 "qi-num"; }
+    如果 (字符串::等于(类型名, "金额") == 1) { 返回 "qi-num"; }
+    返回 "qi-txt";
 }
 
 // 整数部分每三位插一个逗号。小数部分和负号原样保留。
@@ -377,27 +377,27 @@
 
 // ── 样式 ────────────────────────────────────────────────────────
 //
-// 一份能用的默认样式。类名全带 qi-表- 前缀，应用要覆盖直接写同名规则即可。
+// 一份能用的默认样式。类名全带 qi-table- 前缀，应用要覆盖直接写同名规则即可。
 公开 函数 数据表样式() : 字符串 {
     返回 `<style>
-.qi-表{border-collapse:collapse; width:100%; font-size:13px}
-.qi-表 th{
+.qi-table{border-collapse:collapse; width:100%; font-size:13px}
+.qi-table th{
   text-align:left; font-weight:600; white-space:nowrap;
   border-bottom:1px solid currentColor; padding:6px 10px 6px 0;
   opacity:.7;
 }
-.qi-表 td{
+.qi-table td{
   padding:5px 10px 5px 0;
   border-bottom:1px solid color-mix(in srgb, currentColor 12%, transparent);
 }
 /* 数字列：右对齐 + 等宽数字。两样缺一不可 —— 只右对齐的话，
    字符宽度不同的数字仍然对不齐，一列数字还是没法一眼比大小。 */
-.qi-表 .qi-右{text-align:right; font-variant-numeric:tabular-nums}
-.qi-表 .qi-左{text-align:left}
-.qi-表 .qi-表-序{width:1%; white-space:nowrap; opacity:.45; text-align:right}
-.qi-表 .qi-表-排{color:inherit; text-decoration:none; cursor:pointer}
-.qi-表 .qi-表-排:hover{text-decoration:underline}
-.qi-表-空{opacity:.6; font-size:13px; padding:10px 0}
+.qi-table .qi-num{text-align:right; font-variant-numeric:tabular-nums}
+.qi-table .qi-txt{text-align:left}
+.qi-table .qi-table-idx{width:1%; white-space:nowrap; opacity:.45; text-align:right}
+.qi-table .qi-table-sort{color:inherit; text-decoration:none; cursor:pointer}
+.qi-table .qi-table-sort:hover{text-decoration:underline}
+.qi-table-empty{opacity:.6; font-size:13px; padding:10px 0}
 </style>
 `;
 }
