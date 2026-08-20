@@ -84,9 +84,18 @@
 
 函数 注册已关(配置值: 账户界面配置) : 响应 {
     返回 状态响应(403, "Forbidden", "text/html; charset=utf-8",
-        `<!doctype html><meta charset="utf-8"><title>不开放注册</title>
-<p style="font:15px/1.7 -apple-system,system-ui,sans-serif;max-width:32em;margin:18vh auto;padding:0 1em">
-这里不开放注册。已经有账号就去 <a href="/login">登录</a>。</p>`);
+        账户页头(配置值, "不开放注册")
+        + 渲染块(HTML {
+            <main class="auth">
+                <h1 class="auth-brand">{配置值.应用名}</h1>
+                <div class="auth-card">
+                    <p class="auth-err">不开放注册</p>
+                    <a class="auth-go" href="/login"
+                       style="display:block;text-align:center;text-decoration:none">登录</a>
+                </div>
+            </main>
+        })
+        + "</body></html>");
 }
 
 公开 函数 账户品牌(配置值: 账户界面配置, 应用名: 字符串, 副标题: 字符串) : 账户界面配置 {
@@ -143,44 +152,123 @@
 
 // ── 页面 ────────────────────────────────────────────────────
 
+// 登录/注册页的样式**自带一份**，不走框架主题。
+//
+// 理由是这两页跟应用内部页面的处境不一样：它是很多人看到的第一屏，
+// 而且是**唯一一屏**——上面没有导航、没有数据，只有一张卡。主题变量
+// 那套是给内容页调色用的，套到这儿的结果是一张灰扑扑的默认卡片。
+//
+// 一切都在一个 <style> 里，选择器全部 auth- 前缀，不会跟应用样式打架。
+函数 账户样式() : 字符串 {
+    返回 `<style>
+:root{
+  --auth-ink:#17171a; --auth-muted:#6b6b73; --auth-line:#e3e3e8;
+  --auth-bg:#f5f5f7; --auth-card:#fff; --auth-bad:#c0392b;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; min-height:100dvh; display:flex; align-items:center; justify-content:center;
+  padding:24px; background:var(--auth-bg); color:var(--auth-ink);
+  font:15px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
+}
+.auth{width:100%; max-width:360px}
+.auth-brand{font-size:26px; font-weight:650; letter-spacing:-.01em; margin:0}
+.auth-sub{color:var(--auth-muted); font-size:14px; margin:6px 0 0}
+.auth-card{
+  background:var(--auth-card); border:1px solid var(--auth-line);
+  border-radius:14px; padding:22px; margin-top:20px;
+  box-shadow:0 1px 2px rgba(0,0,0,.04), 0 12px 32px rgba(0,0,0,.06);
+}
+/* 分段切换：两个等宽格子，选中的那个是白底浮起来的 */
+.auth-seg{
+  display:grid; grid-template-columns:1fr 1fr; gap:3px;
+  background:var(--auth-bg); border-radius:10px; padding:3px; margin-bottom:18px;
+}
+.auth-seg a{
+  text-align:center; padding:7px 0; border-radius:8px; font-size:14px;
+  color:var(--auth-muted); text-decoration:none;
+}
+.auth-seg a.on{background:var(--auth-card); color:var(--auth-ink); font-weight:600;
+  box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.auth-f{display:block; margin-bottom:12px}
+.auth-f span{display:block; font-size:12px; color:var(--auth-muted); margin-bottom:5px}
+.auth-f input{
+  width:100%; padding:11px 12px; font-size:15px; font-family:inherit;
+  color:var(--auth-ink); background:var(--auth-card);
+  border:1px solid var(--auth-line); border-radius:9px; outline:none;
+  transition:border-color .12s, box-shadow .12s;
+}
+.auth-f input:focus{border-color:var(--auth-ink); box-shadow:0 0 0 3px rgba(23,23,26,.07)}
+.auth-go{
+  width:100%; margin-top:6px; padding:12px; font-size:15px; font-weight:600;
+  font-family:inherit; color:#fff; background:var(--auth-ink);
+  border:0; border-radius:9px; cursor:pointer;
+}
+.auth-go:hover{opacity:.9}
+.auth-go:active{transform:translateY(1px)}
+.auth-err{
+  margin:0 0 14px; padding:9px 12px; font-size:13px;
+  color:var(--auth-bad); background:rgba(192,57,43,.07);
+  border:1px solid rgba(192,57,43,.25); border-radius:9px;
+}
+@media (prefers-color-scheme:dark){
+  :root{--auth-ink:#f2f2f4; --auth-muted:#9a9aa3; --auth-line:#333338;
+        --auth-bg:#121214; --auth-card:#1c1c1f;}
+  .auth-go{color:#121214}
+}
+</style>
+`;
+}
+
 函数 账户页头(配置值: 账户界面配置, 标题: 字符串) : 字符串 {
     变量 h: 字符串 = "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">";
     h = h + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">";
     h = h + "<title>" + 转义HTML(标题) + " · " + 转义HTML(配置值.应用名) + "</title>";
-    h = h + 样式标签();
+    h = h + 账户样式();
+    // 应用给了主题令牌就仍然让它生效 —— 有人靠它换主色
     如果 (字符串::字节长度(配置值.主题令牌) > 0) {
         h = h + 主题(配置值.主题令牌);
     }
-    h = h + 主题("--qi-width:400px");
-    h = h + "<style>.qi-card{margin-top:8vh}.tabs{display:flex;gap:18px;margin:0 0 18px}";
-    h = h + ".tabs a{font-size:15px;font-weight:700;padding-bottom:4px}";
-    h = h + ".tabs a.on{color:var(--qi-accent);border-bottom:2.5px solid var(--qi-accent)}";
-    h = h + ".err{margin:0 0 12px;padding:9px 12px;background:var(--qi-danger-soft);";
-    h = h + "border:1.5px solid var(--qi-danger-line);border-radius:9px;color:var(--qi-danger);font-size:14px}";
-    h = h + "</style></head><body>";
+    h = h + "</head><body>";
     返回 h;
 }
 
-// 顶部两个页签 + 可选错误条
+// 品牌 + 分段切换 + 可选错误条 + 表单
 函数 账户表单壳(配置值: 账户界面配置, 当前页: 字符串, 错误: 字符串, 表单: HTML块) : HTML块 {
     变量 登录标记: 字符串 = "";
     变量 注册标记: 字符串 = "";
     如果 (字符串::等于(当前页, "login") == 1) { 登录标记 = "on"; } 否则 { 注册标记 = "on"; }
+
+    变量 副: HTML块 = 创建片段();
+    如果 (字符串::字节长度(配置值.副标题) > 0) {
+        副 = HTML { <p class="auth-sub">{配置值.副标题}</p> };
+    }
     变量 错误块: HTML块 = 创建片段();
     如果 (字符串::字节长度(错误) > 0) {
-        错误块 = HTML { <p class="err">{错误}</p> };
+        错误块 = HTML { <p class="auth-err">{错误}</p> };
     }
-    返回 HTML {
-        <div class="qi-card">
-            <h1>{配置值.应用名}</h1>
-            <p class="qi-muted">{配置值.副标题}</p>
-            <div class="tabs">
+
+    // 注册关掉时不摆那个页签 —— 摆一个点进去是 403 的入口比没有更气人
+    变量 切换: HTML块 = 创建片段();
+    如果 (配置值.准注册() == 1) {
+        切换 = HTML {
+            <nav class="auth-seg">
                 <a class={登录标记} href="/login">登录</a>
                 <a class={注册标记} href="/register">注册</a>
+            </nav>
+        };
+    }
+
+    返回 HTML {
+        <main class="auth">
+            <h1 class="auth-brand">{配置值.应用名}</h1>
+            {副}
+            <div class="auth-card">
+                {切换}
+                {错误块}
+                {表单}
             </div>
-            {错误块}
-            {表单}
-        </div>
+        </main>
     };
 }
 
@@ -190,9 +278,16 @@
     }
     变量 表单: HTML块 = HTML {
         <form method="POST" action="/api/login">
-            <input name="name" placeholder={配置值.名字标签} required maxlength="20" autofocus>
-            <input name="password" type="password" placeholder="密码" required maxlength="64">
-            <button type="submit" class="block">登录</button>
+            <label class="auth-f">
+                <span>{配置值.名字标签}</span>
+                <input name="name" required maxlength="20" autofocus autocomplete="username">
+            </label>
+            <label class="auth-f">
+                <span>密码</span>
+                <input name="password" type="password" required maxlength="64"
+                       autocomplete="current-password">
+            </label>
+            <button type="submit" class="auth-go">登录</button>
         </form>
     };
     返回 HTML(账户页头(配置值, "登录")
@@ -205,13 +300,25 @@
     如果 (账户当前用户(上下文值, 配置值) >= 0) {
         返回 重定向(配置值.登录后);
     }
-    变量 密码提示: 字符串 = "设置密码（至少 " + 整数转字符串(配置值.最短密码) + " 位）";
+    // 最短位数写在标签里，不是提示语 —— 它是个约束，得在输入之前看见
+    变量 密码标签: 字符串 = "密码（至少 " + 整数转字符串(配置值.最短密码) + " 位）";
     变量 表单: HTML块 = HTML {
         <form method="POST" action="/api/register">
-            <input name="name" placeholder={配置值.名字标签} required maxlength="20" autofocus>
-            <input name="password" type="password" placeholder={密码提示} required maxlength="64">
-            <input name="password2" type="password" placeholder="再输一遍" required maxlength="64">
-            <button type="submit" class="block">注册并进入</button>
+            <label class="auth-f">
+                <span>{配置值.名字标签}</span>
+                <input name="name" required maxlength="20" autofocus autocomplete="username">
+            </label>
+            <label class="auth-f">
+                <span>{密码标签}</span>
+                <input name="password" type="password" required maxlength="64"
+                       minlength={整数转字符串(配置值.最短密码)} autocomplete="new-password">
+            </label>
+            <label class="auth-f">
+                <span>再输一遍</span>
+                <input name="password2" type="password" required maxlength="64"
+                       autocomplete="new-password">
+            </label>
+            <button type="submit" class="auth-go">注册</button>
         </form>
     };
     返回 HTML(账户页头(配置值, "注册")
