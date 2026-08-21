@@ -94,6 +94,12 @@
 // 代价要说清楚：**隐藏的字段仍然会随表单提交**。所以这不是权限，
 // 是「别让人看见跟当前选择无关的十个框」。真要禁止某些组合，
 // 在 保存一条 之后自己校验 —— 这一层挡不住。
+// 值 可以给**多个，空格分开** —— `字段仅当(f, "类别", "定期 活期理财")`。
+//
+// 需要多值是被真需求逼的：「年化」这一列定期和活期理财都要填，而两者
+// 是不同的类别。用两个 字段仅当 各挂一个类别做不到 —— 它们指向同一列，
+// 表单里就会出现两个同名 input，被隐藏的那个照样提交空值，把另一个
+// 刚填的值冲掉。这正是本函数注释里那条「隐藏字段照样提交」的后果。
 公开 函数 字段仅当(字段: 字段规格, 列: 字符串, 值: 字符串) : 字段规格 {
     字段.仅当列 = 列;
     字段.仅当值 = 值;
@@ -236,9 +242,9 @@
   function sync(form) {
     form.querySelectorAll('.qi-admin-when').forEach(function (box) {
       var field = box.getAttribute('data-when-field');
-      var want = box.getAttribute('data-when-value');
+      var want = (box.getAttribute('data-when-value') || '').split(/\s+/);
       var src = form.querySelector('[name="' + field + '"]');
-      box.hidden = !src || String(src.value) !== want;
+      box.hidden = !src || want.indexOf(String(src.value)) < 0;
     });
   }
   document.addEventListener('change', function (e) {
